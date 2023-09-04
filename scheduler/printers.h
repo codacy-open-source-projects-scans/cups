@@ -54,7 +54,7 @@ typedef struct cupsd_job_s cupsd_job_t;
 
 struct cupsd_printer_s
 {
-  _cups_rwlock_t lock;			/* Concurrency lock for background updates */
+  cups_rwlock_t lock;			/* Concurrency lock for background updates */
   int		printer_id;		/* Printer ID */
   char		*uri,			/* Printer URI */
 		*uuid,			/* Printer UUID */
@@ -119,9 +119,7 @@ struct cupsd_printer_s
 		*pdl;			/* pdl value for TXT record */
   cupsd_srv_t	ipp_srv;		/* IPP service(s) */
 #  ifdef HAVE_MDNSRESPONDER
-#    ifdef HAVE_TLS
   cupsd_srv_t	ipps_srv;		/* IPPS service(s) */
-#    endif /* HAVE_TLS */
   cupsd_srv_t	printer_srv;		/* LPD service */
 #  endif /* HAVE_MDNSRESPONDER */
 #endif /* HAVE_DNSSD */

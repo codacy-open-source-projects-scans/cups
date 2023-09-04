@@ -168,7 +168,7 @@ typedef struct ipptool_test_s		/**** Test Data ****/
   char		test_id[1024];		/* Test identifier */
   ipptool_transfer_t transfer;		/* To chunk or not to chunk */
   int		version;		/* IPP version number to use */
-  _cups_thread_t monitor_thread;	/* Monitoring thread ID */
+  cups_thread_t monitor_thread;	/* Monitoring thread ID */
   int		monitor_done;		/* Set to 1 to stop monitor thread */
   char		*monitor_uri;		/* MONITOR-PRINTER-STATE URI */
   useconds_t	monitor_delay,		/* MONITOR-PRINTER-STATE DELAY value, if any */
@@ -342,12 +342,7 @@ main(int  argc,				/* I - Number of command-line args */
               break;
 
 	  case 'E' : /* Encrypt with TLS */
-#ifdef HAVE_TLS
 	      data.encryption = HTTP_ENCRYPT_REQUIRED;
-#else
-	      _cupsLangPrintf(stderr, _("%s: Sorry, no encryption support."),
-			      argv[0]);
-#endif /* HAVE_TLS */
 	      break;
 
           case 'I' : /* Ignore errors */
@@ -390,11 +385,7 @@ main(int  argc,				/* I - Number of command-line args */
               break;
 
 	  case 'S' : /* Encrypt with SSL */
-#ifdef HAVE_TLS
 	      data.encryption = HTTP_ENCRYPT_ALWAYS;
-#else
-	      _cupsLangPrintf(stderr, _("%s: Sorry, no encryption support."), "ipptool");
-#endif /* HAVE_TLS */
 	      break;
 
 	  case 'T' : /* Set timeout */
@@ -641,11 +632,7 @@ main(int  argc,				/* I - Number of command-line args */
 	}
       }
     }
-    else if (!strncmp(argv[i], "ipp://", 6) || !strncmp(argv[i], "http://", 7)
-#ifdef HAVE_TLS
-	     || !strncmp(argv[i], "ipps://", 7) || !strncmp(argv[i], "https://", 8)
-#endif /* HAVE_TLS */
-	     )
+    else if (!strncmp(argv[i], "ipp://", 6) || !strncmp(argv[i], "http://", 7) || !strncmp(argv[i], "ipps://", 7) || !strncmp(argv[i], "https://", 8))
     {
      /*
       * Set URI...
@@ -657,10 +644,8 @@ main(int  argc,				/* I - Number of command-line args */
         usage();
       }
 
-#ifdef HAVE_TLS
       if (!strncmp(argv[i], "ipps://", 7) || !strncmp(argv[i], "https://", 8))
         data.encryption = HTTP_ENCRYPT_ALWAYS;
-#endif /* HAVE_TLS */
 
       if (!_ippVarsSet(data.vars, "uri", argv[i]))
       {
@@ -1210,7 +1195,7 @@ do_test(_ipp_file_t    *f,		/* I - IPP data file */
   if (data->monitor_uri)
   {
     data->monitor_done   = 0;
-    data->monitor_thread = _cupsThreadCreate((_cups_thread_func_t)do_monitor_printer_state, data);
+    data->monitor_thread = cupsThreadCreate((cups_thread_func_t)do_monitor_printer_state, data);
   }
 
  /*
@@ -2156,7 +2141,7 @@ do_test(_ipp_file_t    *f,		/* I - IPP data file */
   if (data->monitor_thread)
   {
     data->monitor_done = 1;
-    _cupsThreadWait(data->monitor_thread);
+    cupsThreadWait(data->monitor_thread);
   }
 
   if (data->output == IPPTOOL_OUTPUT_PLIST)
@@ -3870,7 +3855,7 @@ print_json_attr(
 }
 
 
-/* 
+/*
  * 'print_json_string()' - Print a string in JSON format.
  */
 
