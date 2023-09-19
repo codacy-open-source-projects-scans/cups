@@ -78,10 +78,10 @@ main(int  argc,				/* I - Number of command-line arguments */
 	switch (*opt)
 	{
 	  case 'E' : /* Encrypt */
-	      cupsSetEncryption(HTTP_ENCRYPT_REQUIRED);
+	      cupsSetEncryption(HTTP_ENCRYPTION_REQUIRED);
 
 	      if (http)
-		httpEncryption(http, HTTP_ENCRYPT_REQUIRED);
+		httpEncryption(http, HTTP_ENCRYPTION_REQUIRED);
 	      break;
 
 	  case 'U' : /* Username */
@@ -130,8 +130,8 @@ main(int  argc,				/* I - Number of command-line arguments */
 
 	      if ((named_dest = cupsGetNamedDest(http, dest, instance)) == NULL)
 	      {
-		if (cupsLastError() == IPP_STATUS_ERROR_BAD_REQUEST ||
-		    cupsLastError() == IPP_STATUS_ERROR_VERSION_NOT_SUPPORTED)
+		if (cupsGetError() == IPP_STATUS_ERROR_BAD_REQUEST ||
+		    cupsGetError() == IPP_STATUS_ERROR_VERSION_NOT_SUPPORTED)
 		  _cupsLangPrintf(stderr, _("%s: Error - add '/version=1.1' to server name."), argv[0]);
 		else if (instance)
 		  _cupsLangPrintf(stderr, _("%s: Error - unknown destination \"%s/%s\"."), argv[0], dest, instance);
@@ -201,8 +201,8 @@ main(int  argc,				/* I - Number of command-line arguments */
   {
     if ((named_dest = cupsGetNamedDest(http, NULL, NULL)) == NULL)
     {
-      if (cupsLastError() == IPP_STATUS_ERROR_BAD_REQUEST ||
-          cupsLastError() == IPP_STATUS_ERROR_VERSION_NOT_SUPPORTED)
+      if (cupsGetError() == IPP_STATUS_ERROR_BAD_REQUEST ||
+          cupsGetError() == IPP_STATUS_ERROR_VERSION_NOT_SUPPORTED)
       {
 	_cupsLangPrintf(stderr,
 	                _("%s: Error - add '/version=1.1' to server name."),
@@ -362,7 +362,7 @@ show_jobs(const char *command,		/* I - Command name */
   *    requesting-user-name
   */
 
-  request = ippNewRequest(id ? IPP_GET_JOB_ATTRIBUTES : IPP_GET_JOBS);
+  request = ippNewRequest(id ? IPP_OP_GET_JOB_ATTRIBUTES : IPP_OP_GET_JOBS);
 
   if (id)
   {
@@ -390,7 +390,7 @@ show_jobs(const char *command,		/* I - Command name */
   }
   else
     ippAddString(request, IPP_TAG_OPERATION, IPP_TAG_NAME,
-                 "requesting-user-name", NULL, cupsUser());
+                 "requesting-user-name", NULL, cupsGetUser());
 
   ippAddStrings(request, IPP_TAG_OPERATION, IPP_TAG_KEYWORD,
                 "requested-attributes",
@@ -404,9 +404,9 @@ show_jobs(const char *command,		/* I - Command name */
 
   if ((response = cupsDoRequest(http, request, "/")) != NULL)
   {
-    if (response->request.status.status_code > IPP_OK_CONFLICT)
+    if (response->request.status.status_code > IPP_STATUS_OK_CONFLICTING)
     {
-      _cupsLangPrintf(stderr, "%s: %s", command, cupsLastErrorString());
+      _cupsLangPrintf(stderr, "%s: %s", command, cupsGetErrorString());
       ippDelete(response);
       return (0);
     }
@@ -435,7 +435,7 @@ show_jobs(const char *command,		/* I - Command name */
 
       jobid       = 0;
       jobsize     = 0;
-      jobstate    = IPP_JOB_PENDING;
+      jobstate    = IPP_JSTATE_PENDING;
       jobname     = "unknown";
       jobuser     = "unknown";
       jobdest     = NULL;
@@ -498,8 +498,8 @@ show_jobs(const char *command,		/* I - Command name */
       * Display the job...
       */
 
-      if (jobstate == IPP_JOB_PROCESSING)
-	strlcpy(rankstr, "active", sizeof(rankstr));
+      if (jobstate == IPP_JSTATE_PROCESSING)
+	cupsCopyString(rankstr, "active", sizeof(rankstr));
       else
       {
        /*
@@ -523,7 +523,7 @@ show_jobs(const char *command,		/* I - Command name */
 	  snprintf(namestr, sizeof(namestr), "%d copies of %s", jobcopies,
 	           jobname);
 	else
-	  strlcpy(namestr, jobname, sizeof(namestr));
+	  cupsCopyString(namestr, jobname, sizeof(namestr));
 
         _cupsLangPrintf(stdout, _("%s: %-33.33s [job %d localhost]"),
 	                jobuser, rankstr, jobid);
@@ -543,7 +543,7 @@ show_jobs(const char *command,		/* I - Command name */
   }
   else
   {
-    _cupsLangPrintf(stderr, "%s: %s", command, cupsLastErrorString());
+    _cupsLangPrintf(stderr, "%s: %s", command, cupsGetErrorString());
     return (0);
   }
 
@@ -582,7 +582,7 @@ show_printer(const char *command,	/* I - Command name */
   *    printer-uri
   */
 
-  request = ippNewRequest(IPP_GET_PRINTER_ATTRIBUTES);
+  request = ippNewRequest(IPP_OP_GET_PRINTER_ATTRIBUTES);
 
   httpAssembleURIf(HTTP_URI_CODING_ALL, uri, sizeof(uri), "ipp", NULL,
                    "localhost", 0, "/printers/%s", dest);
@@ -595,9 +595,9 @@ show_printer(const char *command,	/* I - Command name */
 
   if ((response = cupsDoRequest(http, request, "/")) != NULL)
   {
-    if (response->request.status.status_code > IPP_OK_CONFLICT)
+    if (response->request.status.status_code > IPP_STATUS_OK_CONFLICTING)
     {
-      _cupsLangPrintf(stderr, "%s: %s", command, cupsLastErrorString());
+      _cupsLangPrintf(stderr, "%s: %s", command, cupsGetErrorString());
       ippDelete(response);
       return;
     }
@@ -605,18 +605,18 @@ show_printer(const char *command,	/* I - Command name */
     if ((attr = ippFindAttribute(response, "printer-state", IPP_TAG_ENUM)) != NULL)
       state = (ipp_pstate_t)attr->values[0].integer;
     else
-      state = IPP_PRINTER_STOPPED;
+      state = IPP_PSTATE_STOPPED;
 
     switch (state)
     {
-      case IPP_PRINTER_IDLE :
+      case IPP_PSTATE_IDLE :
           _cupsLangPrintf(stdout, _("%s is ready"), dest);
 	  break;
-      case IPP_PRINTER_PROCESSING :
+      case IPP_PSTATE_PROCESSING :
           _cupsLangPrintf(stdout, _("%s is ready and printing"),
 	                  dest);
 	  break;
-      case IPP_PRINTER_STOPPED :
+      case IPP_PSTATE_STOPPED :
           _cupsLangPrintf(stdout, _("%s is not ready"), dest);
 	  break;
     }
@@ -624,7 +624,7 @@ show_printer(const char *command,	/* I - Command name */
     ippDelete(response);
   }
   else
-    _cupsLangPrintf(stderr, "%s: %s", command, cupsLastErrorString());
+    _cupsLangPrintf(stderr, "%s: %s", command, cupsGetErrorString());
 }
 
 

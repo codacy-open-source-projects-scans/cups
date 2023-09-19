@@ -135,21 +135,6 @@
 
 
 /*
- * Do we have posix_spawn?
- */
-
-#undef HAVE_POSIX_SPAWN
-
-
-/*
- * Do we have ZLIB?
- */
-
-#undef HAVE_LIBZ
-#undef HAVE_INFLATECOPY
-
-
-/*
  * Do we have PAM stuff?
  */
 
@@ -157,20 +142,6 @@
 #undef HAVE_PAM_PAM_APPL_H
 #undef HAVE_PAM_SET_ITEM
 #undef HAVE_PAM_SETCRED
-
-
-/*
- * Do we have <shadow.h>?
- */
-
-#undef HAVE_SHADOW_H
-
-
-/*
- * Do we have <crypt.h>?
- */
-
-#undef HAVE_CRYPT_H
 
 
 /*
@@ -252,14 +223,6 @@
 
 
 /*
- * What signal functions to use?
- */
-
-#undef HAVE_SIGSET
-#undef HAVE_SIGACTION
-
-
-/*
  * What wait functions to use?
  */
 
@@ -336,13 +299,6 @@
 
 
 /*
- * Do we have DNS Service Discovery (aka Bonjour) support?
- */
-
-#undef HAVE_DNSSD
-
-
-/*
  * Do we have mDNSResponder for DNS-SD?
  */
 
@@ -375,27 +331,6 @@
  */
 
 #undef HAVE_TM_GMTOFF
-
-
-/*
- * Do we have rresvport_af()?
- */
-
-#undef HAVE_RRESVPORT_AF
-
-
-/*
- * Do we have getaddrinfo()?
- */
-
-#undef HAVE_GETADDRINFO
-
-
-/*
- * Do we have getnameinfo()?
- */
-
-#undef HAVE_GETNAMEINFO
 
 
 /*
@@ -547,15 +482,6 @@
  */
 
 #define CUPS_DEFAULT_GSSSERVICENAME	""
-
-
-/*
- * Select/poll interfaces...
- */
-
-#undef HAVE_POLL
-#undef HAVE_EPOLL
-#undef HAVE_KQUEUE
 
 
 /*

@@ -171,9 +171,7 @@ _cupsStrAlloc(const char *s)		/* I - String */
     item->ref_count ++;
 
 #ifdef DEBUG_GUARDS
-    DEBUG_printf(("5_cupsStrAlloc: Using string %p(%s) for \"%s\", guard=%08x, "
-                  "ref_count=%d", item, item->str, s, item->guard,
-		  item->ref_count));
+    DEBUG_printf("5_cupsStrAlloc: Using string %p(%s) for \"%s\", guard=%08x, ref_count=%d", item, item->str, s, item->guard, item->ref_count);
 
     if (item->guard != _CUPS_STR_GUARD)
       abort();
@@ -203,9 +201,7 @@ _cupsStrAlloc(const char *s)		/* I - String */
 #ifdef DEBUG_GUARDS
   item->guard = _CUPS_STR_GUARD;
 
-  DEBUG_printf(("5_cupsStrAlloc: Created string %p(%s) for \"%s\", guard=%08x, "
-		"ref_count=%d", item, item->str, s, item->guard,
-		item->ref_count));
+  DEBUG_printf("5_cupsStrAlloc: Created string %p(%s) for \"%s\", guard=%08x, ref_count=%d", item, item->str, s, item->guard, item->ref_count);
 #endif /* DEBUG_GUARDS */
 
  /*
@@ -263,8 +259,7 @@ _cupsStrFlush(void)
   _cups_sp_item_t	*item;		/* Current item */
 
 
-  DEBUG_printf(("4_cupsStrFlush: %d strings in array",
-                cupsArrayCount(stringpool)));
+  DEBUG_printf("4_cupsStrFlush: %d strings in array", cupsArrayCount(stringpool));
 
   cupsMutexLock(&sp_mutex);
 
@@ -352,7 +347,7 @@ _cupsStrFormatd(char         *buf,	/* I - String */
   }
   else
   {
-    strlcpy(buf, temp, (size_t)(bufend - buf + 1));
+    cupsCopyString(buf, temp, (size_t)(bufend - buf + 1));
     bufptr = buf + strlen(buf);
   }
 
@@ -407,7 +402,7 @@ _cupsStrFree(const char *s)		/* I - String to free */
 #ifdef DEBUG_GUARDS
     if (key->guard != _CUPS_STR_GUARD)
     {
-      DEBUG_printf(("5_cupsStrFree: Freeing string %p(%s), guard=%08x, ref_count=%d", key, key->str, key->guard, key->ref_count));
+      DEBUG_printf("5_cupsStrFree: Freeing string %p(%s), guard=%08x, ref_count=%d", key, key->str, key->guard, key->ref_count);
       abort();
     }
 #endif /* DEBUG_GUARDS */
@@ -451,8 +446,7 @@ _cupsStrRetain(const char *s)		/* I - String to retain */
 #ifdef DEBUG_GUARDS
     if (item->guard != _CUPS_STR_GUARD)
     {
-      DEBUG_printf(("5_cupsStrRetain: Retaining string %p(%s), guard=%08x, "
-                    "ref_count=%d", item, s, item->guard, item->ref_count));
+      DEBUG_printf("5_cupsStrRetain: Retaining string %p(%s), guard=%08x, ref_count=%d", item, s, item->guard, item->ref_count);
       abort();
     }
 #endif /* DEBUG_GUARDS */
@@ -527,7 +521,7 @@ _cupsStrScand(const char   *buf,	/* I - Pointer to number */
 
     if (loc && loc->decimal_point)
     {
-      strlcpy(tempptr, loc->decimal_point, sizeof(temp) - (size_t)(tempptr - temp));
+      cupsCopyString(tempptr, loc->decimal_point, sizeof(temp) - (size_t)(tempptr - temp));
       tempptr += strlen(tempptr);
     }
     else if (tempptr < (temp + sizeof(temp) - 1))
@@ -674,30 +668,6 @@ _cups_strcpy(char       *dst,		/* I - Destination string */
 
 
 /*
- * '_cups_strdup()' - Duplicate a string.
- */
-
-#ifndef HAVE_STRDUP
-char 	*				/* O - New string pointer */
-_cups_strdup(const char *s)		/* I - String to duplicate */
-{
-  char		*t;			/* New string pointer */
-  size_t	slen;			/* Length of string */
-
-
-  if (!s)
-    return (NULL);
-
-  slen = strlen(s);
-  if ((t = malloc(slen + 1)) == NULL)
-    return (NULL);
-
-  return (memcpy(t, s, slen + 1));
-}
-#endif /* !HAVE_STRDUP */
-
-
-/*
  * '_cups_strcasecmp()' - Do a case-insensitive comparison.
  */
 
@@ -758,11 +728,11 @@ _cups_strncasecmp(const char *s,	/* I - First string */
 
 #ifndef HAVE_STRLCAT
 /*
- * '_cups_strlcat()' - Safely concatenate two strings.
+ * '_cups_cupsConcatString()' - Safely concatenate two strings.
  */
 
 size_t					/* O - Length of string */
-_cups_strlcat(char       *dst,		/* O - Destination string */
+_cups_cupsConcatString(char       *dst,		/* O - Destination string */
               const char *src,		/* I - Source string */
 	      size_t     size)		/* I - Size of destination string buffer */
 {
@@ -804,11 +774,11 @@ _cups_strlcat(char       *dst,		/* O - Destination string */
 
 #ifndef HAVE_STRLCPY
 /*
- * '_cups_strlcpy()' - Safely copy two strings.
+ * '_cups_cupsCopyString()' - Safely copy two strings.
  */
 
 size_t					/* O - Length of string */
-_cups_strlcpy(char       *dst,		/* O - Destination string */
+_cups_cupsCopyString(char       *dst,		/* O - Destination string */
               const char *src,		/* I - Source string */
 	      size_t      size)		/* I - Size of destination string buffer */
 {

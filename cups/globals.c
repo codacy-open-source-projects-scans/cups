@@ -63,11 +63,7 @@ static void		cups_globals_init(void);
 void
 _cupsGlobalLock(void)
 {
-#ifdef HAVE_PTHREAD_H
-  pthread_mutex_lock(&cups_global_mutex);
-#elif defined(_WIN32)
-  EnterCriticalSection(&cups_global_mutex.m_criticalSection);
-#endif /* HAVE_PTHREAD_H */
+  cupsMutexLock(&cups_global_mutex);
 }
 
 
@@ -118,11 +114,7 @@ _cupsGlobals(void)
 void
 _cupsGlobalUnlock(void)
 {
-#ifdef HAVE_PTHREAD_H
-  pthread_mutex_unlock(&cups_global_mutex);
-#elif defined(_WIN32)
-  LeaveCriticalSection(&cups_global_mutex.m_criticalSection);
-#endif /* HAVE_PTHREAD_H */
+  cupsMutexUnlock(&cups_global_mutex);
 }
 
 
@@ -226,7 +218,7 @@ cups_globals_alloc(void)
     * Open the registry...
     */
 
-    strlcpy(installdir, "C:/Program Files/cups.org", sizeof(installdir));
+    cupsCopyString(installdir, "C:/Program Files/cups.org", sizeof(installdir));
 
     if (!RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\cups.org", 0, KEY_READ, &key))
     {
@@ -281,12 +273,12 @@ cups_globals_alloc(void)
 				// User profile (home) directory
     char	*homeptr;	// Pointer into homedir
 
-    DEBUG_printf(("cups_globals_alloc: USERPROFILE=\"%s\"", userprofile));
+    DEBUG_printf("cups_globals_alloc: USERPROFILE=\"%s\"", userprofile);
 
     if (!strncmp(userprofile, "C:\\", 3))
       userprofile += 2;
 
-    strlcpy(homedir, userprofile, sizeof(homedir));
+    cupsCopyString(homedir, userprofile, sizeof(homedir));
     for (homeptr = homedir; *homeptr; homeptr ++)
     {
       // Convert back slashes to forward slashes
@@ -294,7 +286,7 @@ cups_globals_alloc(void)
         *homeptr = '/';
     }
 
-    DEBUG_printf(("cups_globals_alloc: homedir=\"%s\"", homedir));
+    DEBUG_printf("cups_globals_alloc: homedir=\"%s\"", homedir);
   }
 
   cg->home = homedir;

@@ -47,7 +47,7 @@
  *
  *     We unload the job attributes when they are not needed to reduce overall
  *     memory consumption.  We don't unload jobs where job->state_value <
- *     IPP_JOB_STOPPED, job->printer != NULL, or job->access_time is recent.
+ *     IPP_JSTATE_STOPPED, job->printer != NULL, or job->access_time is recent.
  *
  * STARTING OF JOBS (start_job)
  *
@@ -202,10 +202,10 @@ cupsdCancelJobs(const char *dest,	/* I - Destination to cancel */
       */
 
       if (purge)
-	cupsdSetJobState(job, IPP_JOB_CANCELED, CUPSD_JOB_PURGE,
+	cupsdSetJobState(job, IPP_JSTATE_CANCELED, CUPSD_JOB_PURGE,
 	                 "Job purged by user.");
-      else if (job->state_value < IPP_JOB_CANCELED)
-	cupsdSetJobState(job, IPP_JOB_CANCELED, CUPSD_JOB_DEFAULT,
+      else if (job->state_value < IPP_JSTATE_CANCELED)
+	cupsdSetJobState(job, IPP_JSTATE_CANCELED, CUPSD_JOB_DEFAULT,
 			 "Job canceled by user.");
     }
   }
@@ -240,7 +240,7 @@ cupsdCheckJobs(void)
                     "cupsdCheckJobs: Job %d - dest=\"%s\", printer=%p, "
                     "state=%d, cancel_time=%ld, hold_until=%ld, kill_time=%ld, "
                     "pending_cost=%d, pending_timeout=%ld", job->id, job->dest,
-                    job->printer, job->state_value, (long)job->cancel_time,
+                    (void *)job->printer, job->state_value, (long)job->cancel_time,
                     (long)job->hold_until, (long)job->kill_time,
                     job->pending_cost, (long)job->pending_timeout);
 
@@ -269,9 +269,9 @@ cupsdCheckJobs(void)
       cancel_after = attr ? ippGetInteger(attr, 0) : MaxJobTime;
 
       if (job->completed)
-	cupsdSetJobState(job, IPP_JOB_CANCELED, CUPSD_JOB_FORCE, "Marking stuck job as completed after %d seconds.", cancel_after);
+	cupsdSetJobState(job, IPP_JSTATE_CANCELED, CUPSD_JOB_FORCE, "Marking stuck job as completed after %d seconds.", cancel_after);
       else
-	cupsdSetJobState(job, IPP_JOB_CANCELED, CUPSD_JOB_DEFAULT, "Canceling stuck job after %d seconds.", cancel_after);
+	cupsdSetJobState(job, IPP_JSTATE_CANCELED, CUPSD_JOB_DEFAULT, "Canceling stuck job after %d seconds.", cancel_after);
       continue;
     }
 
@@ -279,7 +279,7 @@ cupsdCheckJobs(void)
     * Start held jobs if they are ready...
     */
 
-    if (job->state_value == IPP_JOB_HELD &&
+    if (job->state_value == IPP_JSTATE_HELD &&
         job->hold_until &&
 	job->hold_until < curtime)
     {
@@ -297,7 +297,7 @@ cupsdCheckJobs(void)
 	     con;
 	     con = (cupsd_client_t *)cupsArrayNext(Clients))
 	  if (con->request &&
-	      con->request->request.op.operation_id == IPP_SEND_DOCUMENT)
+	      con->request->request.op.operation_id == IPP_OP_SEND_DOCUMENT)
 	    break;
 
         if (con)
@@ -306,11 +306,11 @@ cupsdCheckJobs(void)
         if (cupsdTimeoutJob(job))
 	  continue;
 
-	cupsdSetJobState(job, IPP_JOB_PENDING, CUPSD_JOB_DEFAULT, "Job submission timed out.");
+	cupsdSetJobState(job, IPP_JSTATE_PENDING, CUPSD_JOB_DEFAULT, "Job submission timed out.");
 	cupsdLogJob(job, CUPSD_LOG_ERROR, "Job submission timed out.");
       }
       else
-	cupsdSetJobState(job, IPP_JOB_PENDING, CUPSD_JOB_DEFAULT, "Job hold expired.");
+	cupsdSetJobState(job, IPP_JSTATE_PENDING, CUPSD_JOB_DEFAULT, "Job hold expired.");
     }
 
    /*
@@ -344,7 +344,7 @@ cupsdCheckJobs(void)
     * Start pending jobs if the destination is available...
     */
 
-    if (job->state_value == IPP_JOB_PENDING && !NeedReload &&
+    if (job->state_value == IPP_JSTATE_PENDING && !NeedReload &&
         (!Sleeping || ACPower) && !DoingShutdown && !job->printer)
     {
       printer = cupsdFindDest(job->dest);
@@ -358,7 +358,7 @@ cupsdCheckJobs(void)
 
         pclass = printer;
 
-        if (pclass->state == IPP_PRINTER_STOPPED)
+        if (pclass->state == IPP_PSTATE_STOPPED)
 	  printer = NULL;
         else if (pclass->type & CUPS_PRINTER_REMOTE)
 	  break;
@@ -373,7 +373,7 @@ cupsdCheckJobs(void)
 	* cancel the job...
 	*/
 
-        cupsdSetJobState(job, IPP_JOB_ABORTED, CUPSD_JOB_PURGE,
+        cupsdSetJobState(job, IPP_JSTATE_ABORTED, CUPSD_JOB_PURGE,
 	                 "Job aborted because the destination printer/class "
 			 "has gone away.");
       }
@@ -400,7 +400,7 @@ cupsdCheckJobs(void)
           cupsdMarkDirty(CUPSD_DIRTY_JOBS);
 	}
 
-        if (!printer->job && printer->state == IPP_PRINTER_IDLE)
+        if (!printer->job && printer->state == IPP_PSTATE_IDLE)
         {
 	 /*
 	  * Start the job...
@@ -451,7 +451,7 @@ cupsdCleanJobs(void)
     if (job->num_files > 0 && ((job->file_time && job->file_time < JobHistoryUpdate) || !JobHistoryUpdate))
       JobHistoryUpdate = job->file_time;
 
-    if (job->state_value >= IPP_JOB_CANCELED && !job->printer)
+    if (job->state_value >= IPP_JSTATE_CANCELED && !job->printer)
     {
      /*
       * Expire old jobs (or job files)...
@@ -496,7 +496,7 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
   ipp_attribute_t	*attr;		/* Current attribute */
   const char		*ptr,		/* Pointer into value */
 			*abort_message;	/* Abort message */
-  ipp_jstate_t		abort_state = IPP_JOB_STOPPED;
+  ipp_jstate_t		abort_state = IPP_JSTATE_STOPPED;
 					/* New job state on abort */
   struct stat		backinfo;	/* Backend file information */
   int			backroot;	/* Run backend as root? */
@@ -529,10 +529,6 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
 			final_content_type[1024] = "",
 					/* FINAL_CONTENT_TYPE env variable */
 			lang[255],	/* LANG env variable */
-#ifdef __APPLE__
-			apple_language[255],
-					/* APPLE_LANGUAGE env variable */
-#endif /* __APPLE__ */
 			auth_info_required[255],
 					/* AUTH_INFO_REQUIRED env variable */
 			ppd[1024],	/* PPD env variable */
@@ -548,7 +544,7 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
 
   cupsdLogMessage(CUPSD_LOG_DEBUG2,
                   "cupsdContinueJob(job=%p(%d)): current_file=%d, num_files=%d",
-	          job, job->id, job->current_file, job->num_files);
+	          (void *)job, job->id, job->current_file, job->num_files);
 
  /*
   * Figure out what filters are required to convert from
@@ -618,7 +614,7 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
 		  job->current_file);
 
       abort_message = "Aborting job because it cannot be printed.";
-      abort_state   = IPP_JOB_ABORTED;
+      abort_state   = IPP_JSTATE_ABORTED;
 
       ippSetString(job->attrs, &job->reasons, 0, "document-unprintable-error");
 
@@ -771,8 +767,6 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
       cupsdLogJob(job, CUPSD_LOG_DEBUG,
 		  "Unable to add decompression filter - %s", strerror(errno));
 
-      cupsArrayDelete(filters);
-
       abort_message = "Stopping job because the scheduler ran out of memory.";
 
       goto abort_job;
@@ -821,7 +815,7 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
 		cupsArrayCount(filters), MAX_FILTERS);
 
     abort_message = "Aborting job because it needs too many filters to print.";
-    abort_state   = IPP_JOB_ABORTED;
+    abort_state   = IPP_JSTATE_ABORTED;
 
     ippSetString(job->attrs, &job->reasons, 0, "document-unprintable-error");
 
@@ -938,12 +932,6 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
   attr = ippFindAttribute(job->attrs, "attributes-natural-language",
                           IPP_TAG_LANGUAGE);
 
-#ifdef __APPLE__
-  strlcpy(apple_language, "APPLE_LANGUAGE=", sizeof(apple_language));
-  _cupsAppleLanguage(attr->values[0].string.text,
-		     apple_language + 15, sizeof(apple_language) - 15);
-#endif /* __APPLE__ */
-
   switch (strlen(attr->values[0].string.text))
   {
     default :
@@ -952,7 +940,7 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
 	* the POSIX locale...
 	*/
 
-	strlcpy(lang, "LANG=C", sizeof(lang));
+	cupsCopyString(lang, "LANG=C", sizeof(lang));
 	break;
 
     case 2 :
@@ -982,7 +970,7 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
       (ptr = strstr(attr->values[0].string.text, "charset=")) != NULL)
     snprintf(charset, sizeof(charset), "CHARSET=%s", ptr + 8);
   else
-    strlcpy(charset, "CHARSET=utf-8", sizeof(charset));
+    cupsCopyString(charset, "CHARSET=utf-8", sizeof(charset));
 
   snprintf(content_type, sizeof(content_type), "CONTENT_TYPE=%s/%s",
            job->filetypes[job->current_file]->super,
@@ -1010,14 +998,14 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
       * All of these strcpy's are safe because we allocated the psr string...
       */
 
-      strlcpy(printer_state_reasons, "PRINTER_STATE_REASONS=", psrlen);
+      cupsCopyString(printer_state_reasons, "PRINTER_STATE_REASONS=", psrlen);
       for (psrptr = printer_state_reasons + 22, i = 0;
            i < job->printer->num_reasons;
 	   i ++)
       {
         if (i)
 	  *psrptr++ = ',';
-	strlcpy(psrptr, job->printer->reasons[i], psrlen - (size_t)(psrptr - printer_state_reasons));
+	cupsCopyString(psrptr, job->printer->reasons[i], psrlen - (size_t)(psrptr - printer_state_reasons));
 	psrptr += strlen(psrptr);
       }
     }
@@ -1046,16 +1034,13 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
 	     job->printer->auth_info_required[2],
 	     job->printer->auth_info_required[3]);
   else
-    strlcpy(auth_info_required, "AUTH_INFO_REQUIRED=none",
+    cupsCopyString(auth_info_required, "AUTH_INFO_REQUIRED=none",
 	    sizeof(auth_info_required));
 
   envc = cupsdLoadEnv(envp, (int)(sizeof(envp) / sizeof(envp[0])));
 
   envp[envc ++] = charset;
   envp[envc ++] = lang;
-#ifdef __APPLE__
-  envp[envc ++] = apple_language;
-#endif /* __APPLE__ */
   envp[envc ++] = ppd;
   envp[envc ++] = content_type;
   envp[envc ++] = device_uri;
@@ -1135,7 +1120,7 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
       snprintf(command, sizeof(command), "%s/filter/%s", ServerBin,
                filter->filter);
     else
-      strlcpy(command, filter->filter, sizeof(command));
+      cupsCopyString(command, filter->filter, sizeof(command));
 
     if (i < (cupsArrayCount(filters) - 1))
     {
@@ -1368,7 +1353,7 @@ cupsdContinueJob(cupsd_job_t *job)	/* I - Job */
   */
 
   cupsdSetJobState(job, abort_state, CUPSD_JOB_DEFAULT, "%s", abort_message);
-  cupsdSetPrinterState(job->printer, IPP_PRINTER_IDLE, 0);
+  cupsdSetPrinterState(job->printer, IPP_PSTATE_IDLE, 0);
   update_job_attrs(job, 0);
 
   if (job->history)
@@ -1493,7 +1478,7 @@ cupsdGetCompletedJobs(
   for (job = (cupsd_job_t *)cupsArrayFirst(Jobs);
        job;
        job = (cupsd_job_t *)cupsArrayNext(Jobs))
-    if ((!p || !_cups_strcasecmp(p->name, job->dest)) && job->state_value >= IPP_JOB_STOPPED && job->completed_time)
+    if ((!p || !_cups_strcasecmp(p->name, job->dest)) && job->state_value >= IPP_JSTATE_STOPPED && job->completed_time)
       cupsArrayAdd(list, job);
 
   return (list);
@@ -1670,7 +1655,7 @@ cupsdLoadJob(cupsd_job_t *job)		/* I - Job */
 
   if (job->attrs)
   {
-    if (job->state_value > IPP_JOB_STOPPED)
+    if (job->state_value > IPP_JSTATE_STOPPED)
       job->access_time = time(NULL);
 
     return (1);
@@ -1692,7 +1677,7 @@ cupsdLoadJob(cupsd_job_t *job)		/* I - Job */
   if ((fp = cupsdOpenConfFile(jobfile)) == NULL)
     goto error;
 
-  if (ippReadIO(fp, (ipp_iocb_t)cupsFileRead, 1, NULL, job->attrs) != IPP_DATA)
+  if (ippReadIO(fp, (ipp_iocb_t)cupsFileRead, 1, NULL, job->attrs) != IPP_STATE_DATA)
   {
     cupsdLogJob(job, CUPSD_LOG_ERROR,
 		"Unable to read job control file \"%s\".", jobfile);
@@ -1728,7 +1713,7 @@ cupsdLoadJob(cupsd_job_t *job)		/* I - Job */
   if ((attr = ippFindAttribute(job->attrs, "time-at-creation", IPP_TAG_INTEGER)) != NULL)
     job->creation_time = attr->values[0].integer;
 
-  if (job->state_value >= IPP_JOB_CANCELED && (attr = ippFindAttribute(job->attrs, "time-at-completed", IPP_TAG_INTEGER)) != NULL)
+  if (job->state_value >= IPP_JSTATE_CANCELED && (attr = ippFindAttribute(job->attrs, "time-at-completed", IPP_TAG_INTEGER)) != NULL)
   {
     job->completed_time = attr->values[0].integer;
 
@@ -1797,14 +1782,14 @@ cupsdLoadJob(cupsd_job_t *job)		/* I - Job */
     switch (job->state_value)
     {
       default :
-      case IPP_JOB_PENDING :
-          if (destptr->state == IPP_PRINTER_STOPPED)
+      case IPP_JSTATE_PENDING :
+          if (destptr->state == IPP_PSTATE_STOPPED)
             reason = "printer-stopped";
           else
             reason = "none";
           break;
 
-      case IPP_JOB_HELD :
+      case IPP_JSTATE_HELD :
           if ((attr = ippFindAttribute(job->attrs, "job-hold-until",
                                        IPP_TAG_ZERO)) != NULL &&
               (attr->value_tag == IPP_TAG_NAME ||
@@ -1816,23 +1801,23 @@ cupsdLoadJob(cupsd_job_t *job)		/* I - Job */
 	    reason = "job-incoming";
           break;
 
-      case IPP_JOB_PROCESSING :
+      case IPP_JSTATE_PROCESSING :
           reason = "job-printing";
           break;
 
-      case IPP_JOB_STOPPED :
+      case IPP_JSTATE_STOPPED :
           reason = "job-stopped";
           break;
 
-      case IPP_JOB_CANCELED :
+      case IPP_JSTATE_CANCELED :
           reason = "job-canceled-by-user";
           break;
 
-      case IPP_JOB_ABORTED :
+      case IPP_JSTATE_ABORTED :
           reason = "aborted-by-system";
           break;
 
-      case IPP_JOB_COMPLETED :
+      case IPP_JSTATE_COMPLETED :
           reason = "job-completed-successfully";
           break;
     }
@@ -1840,9 +1825,9 @@ cupsdLoadJob(cupsd_job_t *job)		/* I - Job */
     job->reasons = ippAddString(job->attrs, IPP_TAG_JOB, IPP_TAG_KEYWORD,
                                 "job-state-reasons", NULL, reason);
   }
-  else if (job->state_value == IPP_JOB_PENDING)
+  else if (job->state_value == IPP_JSTATE_PENDING)
   {
-    if (destptr->state == IPP_PRINTER_STOPPED)
+    if (destptr->state == IPP_PSTATE_STOPPED)
       ippSetString(job->attrs, &job->reasons, 0, "printer-stopped");
     else
       ippSetString(job->attrs, &job->reasons, 0, "none");
@@ -1894,7 +1879,7 @@ cupsdLoadJob(cupsd_job_t *job)		/* I - Job */
   * Set the job hold-until time and state...
   */
 
-  if (job->state_value == IPP_JOB_HELD)
+  if (job->state_value == IPP_JSTATE_HELD)
   {
     if ((attr = ippFindAttribute(job->attrs, "job-hold-until",
 	                         IPP_TAG_KEYWORD)) == NULL)
@@ -1904,14 +1889,14 @@ cupsdLoadJob(cupsd_job_t *job)		/* I - Job */
       cupsdSetJobHoldUntil(job, attr->values[0].string.text, CUPSD_JOB_DEFAULT);
     else
     {
-      job->state->values[0].integer = IPP_JOB_PENDING;
-      job->state_value              = IPP_JOB_PENDING;
+      job->state->values[0].integer = IPP_JSTATE_PENDING;
+      job->state_value              = IPP_JSTATE_PENDING;
     }
   }
-  else if (job->state_value == IPP_JOB_PROCESSING)
+  else if (job->state_value == IPP_JSTATE_PROCESSING)
   {
-    job->state->values[0].integer = IPP_JOB_PENDING;
-    job->state_value              = IPP_JOB_PENDING;
+    job->state->values[0].integer = IPP_JSTATE_PENDING;
+    job->state_value              = IPP_JSTATE_PENDING;
   }
 
   if ((attr = ippFindAttribute(job->attrs, "job-k-octets", IPP_TAG_INTEGER)) != NULL)
@@ -1997,7 +1982,7 @@ cupsdLoadJob(cupsd_job_t *job)		/* I - Job */
   * Load authentication information as needed...
   */
 
-  if (job->state_value < IPP_JOB_STOPPED)
+  if (job->state_value < IPP_JSTATE_STOPPED)
   {
     snprintf(jobfile, sizeof(jobfile), "%s/a%05d", RequestRoot, job->id);
 
@@ -2099,7 +2084,7 @@ cupsdMoveJob(cupsd_job_t     *job,	/* I - Job */
   * Don't move completed jobs...
   */
 
-  if (job->state_value > IPP_JOB_STOPPED)
+  if (job->state_value > IPP_JSTATE_STOPPED)
     return;
 
  /*
@@ -2117,8 +2102,8 @@ cupsdMoveJob(cupsd_job_t     *job,	/* I - Job */
   * Change the destination information...
   */
 
-  if (job->state_value > IPP_JOB_HELD)
-    cupsdSetJobState(job, IPP_JOB_PENDING, CUPSD_JOB_DEFAULT,
+  if (job->state_value > IPP_JSTATE_HELD)
+    cupsdSetJobState(job, IPP_JSTATE_PENDING, CUPSD_JOB_DEFAULT,
 		     "Stopping job prior to move.");
 
   cupsdAddEvent(CUPSD_EVENT_JOB_CONFIG_CHANGED, oldp, job,
@@ -2148,10 +2133,10 @@ cupsdMoveJob(cupsd_job_t     *job,	/* I - Job */
 void
 cupsdReleaseJob(cupsd_job_t *job)	/* I - Job */
 {
-  cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdReleaseJob(job=%p(%d))", job,
+  cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdReleaseJob(job=%p(%d))", (void *)job,
                   job->id);
 
-  if (job->state_value == IPP_JOB_HELD)
+  if (job->state_value == IPP_JSTATE_HELD)
   {
    /*
     * Add trailing banner as needed...
@@ -2160,7 +2145,7 @@ cupsdReleaseJob(cupsd_job_t *job)	/* I - Job */
     if (job->pending_timeout)
       cupsdTimeoutJob(job);
 
-    cupsdSetJobState(job, IPP_JOB_PENDING, CUPSD_JOB_DEFAULT,
+    cupsdSetJobState(job, IPP_JSTATE_PENDING, CUPSD_JOB_DEFAULT,
                      "Job released by user.");
   }
 }
@@ -2173,11 +2158,11 @@ cupsdReleaseJob(cupsd_job_t *job)	/* I - Job */
 void
 cupsdRestartJob(cupsd_job_t *job)	/* I - Job */
 {
-  cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdRestartJob(job=%p(%d))", job,
+  cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdRestartJob(job=%p(%d))", (void *)job,
                   job->id);
 
-  if (job->state_value == IPP_JOB_STOPPED || job->num_files)
-    cupsdSetJobState(job, IPP_JOB_PENDING, CUPSD_JOB_DEFAULT,
+  if (job->state_value == IPP_JSTATE_STOPPED || job->num_files)
+    cupsdSetJobState(job, IPP_JSTATE_PENDING, CUPSD_JOB_DEFAULT,
                      "Job restarted by user.");
 }
 
@@ -2263,7 +2248,7 @@ cupsdSaveJob(cupsd_job_t *job)		/* I - Job */
 
 
   cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdSaveJob(job=%p(%d)): job->attrs=%p",
-                  job, job->id, job->attrs);
+                  (void *)job, job->id, (void *)job->attrs);
 
   if (job->printer && job->printer->temporary)
   {
@@ -2282,10 +2267,10 @@ cupsdSaveJob(cupsd_job_t *job)		/* I - Job */
 
   fchown(cupsFileNumber(fp), RunUser, Group);
 
-  job->attrs->state = IPP_IDLE;
+  job->attrs->state = IPP_STATE_IDLE;
 
   if (ippWriteIO(fp, (ipp_iocb_t)cupsFileWrite, 1, NULL,
-                 job->attrs) != IPP_DATA)
+                 job->attrs) != IPP_STATE_DATA)
   {
     cupsdLogJob(job, CUPSD_LOG_ERROR, "Unable to write job control file.");
     cupsFileClose(fp);
@@ -2298,7 +2283,7 @@ cupsdSaveJob(cupsd_job_t *job)		/* I - Job */
     * Remove backup file and mark this job as clean...
     */
 
-    strlcat(filename, ".O", sizeof(filename));
+    cupsConcatString(filename, ".O", sizeof(filename));
     unlink(filename);
 
     job->dirty = 0;
@@ -2324,7 +2309,7 @@ cupsdSetJobHoldUntil(cupsd_job_t *job,	/* I - Job */
 
   cupsdLogMessage(CUPSD_LOG_DEBUG2,
                   "cupsdSetJobHoldUntil(job=%p(%d), when=\"%s\", update=%d)",
-                  job, job->id, when, update);
+                  (void *)job, job->id, when, update);
 
   if (update)
   {
@@ -2503,7 +2488,7 @@ cupsdSetJobPriority(
   * Don't change completed jobs...
   */
 
-  if (job->state_value >= IPP_JOB_PROCESSING)
+  if (job->state_value >= IPP_JSTATE_PROCESSING)
     return;
 
  /*
@@ -2548,7 +2533,7 @@ cupsdSetJobState(
 
   cupsdLogMessage(CUPSD_LOG_DEBUG2,
                   "cupsdSetJobState(job=%p(%d), state=%d, newstate=%d, "
-		  "action=%d, message=\"%s\")", job, job->id, job->state_value,
+		  "action=%d, message=\"%s\")", (void *)job, job->id, job->state_value,
 		  newstate, action, message ? message : "(null)");
 
 
@@ -2572,7 +2557,7 @@ cupsdSetJobState(
   * Stop any processes that are working on the current job...
   */
 
-  if (oldstate == IPP_JOB_PROCESSING)
+  if (oldstate == IPP_JSTATE_PROCESSING)
     stop_job(job, action);
 
  /*
@@ -2586,7 +2571,7 @@ cupsdSetJobState(
 
   switch (newstate)
   {
-    case IPP_JOB_PENDING :
+    case IPP_JSTATE_PENDING :
        /*
 	* Update job-hold-until as needed...
 	*/
@@ -2604,9 +2589,9 @@ cupsdSetJobState(
     default :
 	break;
 
-    case IPP_JOB_ABORTED :
-    case IPP_JOB_CANCELED :
-    case IPP_JOB_COMPLETED :
+    case IPP_JSTATE_ABORTED :
+    case IPP_JSTATE_CANCELED :
+    case IPP_JSTATE_COMPLETED :
 	set_time(job, "time-at-completed");
 	ippSetString(job->attrs, &job->reasons, 0, "processing-to-stop-point");
         break;
@@ -2625,12 +2610,12 @@ cupsdSetJobState(
     vsnprintf(buffer, sizeof(buffer), message, ap);
     va_end(ap);
 
-    if (newstate > IPP_JOB_STOPPED)
+    if (newstate > IPP_JSTATE_STOPPED)
       cupsdAddEvent(CUPSD_EVENT_JOB_COMPLETED, job->printer, job, "%s", buffer);
     else
       cupsdAddEvent(CUPSD_EVENT_JOB_STATE, job->printer, job, "%s", buffer);
 
-    if (newstate == IPP_JOB_STOPPED || newstate == IPP_JOB_ABORTED)
+    if (newstate == IPP_JSTATE_STOPPED || newstate == IPP_JSTATE_ABORTED)
       cupsdLogJob(job, CUPSD_LOG_ERROR, "%s", buffer);
     else
       cupsdLogJob(job, CUPSD_LOG_INFO, "%s", buffer);
@@ -2642,7 +2627,7 @@ cupsdSetJobState(
 
   switch (newstate)
   {
-    case IPP_JOB_PROCESSING :
+    case IPP_JSTATE_PROCESSING :
        /*
         * Add the job to the "printing" list...
 	*/
@@ -2656,9 +2641,9 @@ cupsdSetJobState(
 
 	set_time(job, "time-at-processing");
 
-    case IPP_JOB_PENDING :
-    case IPP_JOB_HELD :
-    case IPP_JOB_STOPPED :
+    case IPP_JSTATE_PENDING :
+    case IPP_JSTATE_HELD :
+    case IPP_JSTATE_STOPPED :
        /*
         * Make sure the job is in the active list...
 	*/
@@ -2674,10 +2659,10 @@ cupsdSetJobState(
 	cupsdMarkDirty(CUPSD_DIRTY_JOBS);
         break;
 
-    case IPP_JOB_ABORTED :
-    case IPP_JOB_CANCELED :
-    case IPP_JOB_COMPLETED :
-        if (newstate == IPP_JOB_CANCELED)
+    case IPP_JSTATE_ABORTED :
+    case IPP_JSTATE_CANCELED :
+    case IPP_JSTATE_COMPLETED :
+        if (newstate == IPP_JSTATE_CANCELED)
 	{
 	 /*
 	  * Remove the job from the active list if there are no processes still
@@ -2793,14 +2778,14 @@ cupsdStopAllJobs(
   {
     if (job->completed)
     {
-      cupsdSetJobState(job, IPP_JOB_COMPLETED, CUPSD_JOB_FORCE, NULL);
+      cupsdSetJobState(job, IPP_JSTATE_COMPLETED, CUPSD_JOB_FORCE, NULL);
     }
     else
     {
       if (kill_delay)
         job->kill_time = time(NULL) + kill_delay;
 
-      cupsdSetJobState(job, IPP_JOB_PENDING, action, NULL);
+      cupsdSetJobState(job, IPP_JSTATE_PENDING, action, NULL);
     }
   }
 }
@@ -2822,7 +2807,7 @@ cupsdUnloadCompletedJobs(void)
   for (job = (cupsd_job_t *)cupsArrayFirst(Jobs);
        job;
        job = (cupsd_job_t *)cupsArrayNext(Jobs))
-    if (job->attrs && job->state_value >= IPP_JOB_STOPPED && !job->printer &&
+    if (job->attrs && job->state_value >= IPP_JSTATE_STOPPED && !job->printer &&
         job->access_time < expire)
     {
       if (job->dirty)
@@ -2853,7 +2838,7 @@ cupsdUpdateJobs(void)
        job;
        job = (cupsd_job_t *)cupsArrayNext(Jobs))
   {
-    if (job->state_value >= IPP_JOB_CANCELED &&
+    if (job->state_value >= IPP_JSTATE_CANCELED &&
         (attr = ippFindAttribute(job->attrs, "time-at-completed",
                                  IPP_TAG_INTEGER)) != NULL)
     {
@@ -3021,8 +3006,8 @@ dump_job_history(cupsd_job_t *job)	/* I - Job */
   {
     snprintf(temp, sizeof(temp), "[Job %d] printer-state=%d(%s)", job->id,
              printer->state,
-	     printer->state == IPP_PRINTER_IDLE ? "idle" :
-	         printer->state == IPP_PRINTER_PROCESSING ? "processing" :
+	     printer->state == IPP_PSTATE_IDLE ? "idle" :
+	         printer->state == IPP_PSTATE_PROCESSING ? "processing" :
 		 "stopped");
     cupsdWriteErrorLog(CUPSD_LOG_DEBUG, temp);
 
@@ -3033,7 +3018,7 @@ dump_job_history(cupsd_job_t *job)	/* I - Job */
     snprintf(temp, sizeof(temp), "[Job %d] printer-state-reasons=", job->id);
     ptr = temp + strlen(temp);
     if (printer->num_reasons == 0)
-      strlcpy(ptr, "none", sizeof(temp) - (size_t)(ptr - temp));
+      cupsCopyString(ptr, "none", sizeof(temp) - (size_t)(ptr - temp));
     else
     {
       for (i = 0;
@@ -3043,7 +3028,7 @@ dump_job_history(cupsd_job_t *job)	/* I - Job */
         if (i)
 	  *ptr++ = ',';
 
-	strlcpy(ptr, printer->reasons[i], sizeof(temp) - (size_t)(ptr - temp));
+	cupsCopyString(ptr, printer->reasons[i], sizeof(temp) - (size_t)(ptr - temp));
 	ptr += strlen(ptr);
       }
     }
@@ -3102,7 +3087,7 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
   char			scheme[255];	/* Device URI scheme */
 
 
-  cupsdLogMessage(CUPSD_LOG_DEBUG2, "finalize_job(job=%p(%d))", job, job->id);
+  cupsdLogMessage(CUPSD_LOG_DEBUG2, "finalize_job(job=%p(%d))", (void *)job, job->id);
   sscanf(job->printer->device_uri, "%254[^:]", scheme);
 
  /*
@@ -3169,25 +3154,25 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
   * Process the exit status...
   */
 
-  if (job->printer->state == IPP_PRINTER_PROCESSING)
-    printer_state = IPP_PRINTER_IDLE;
+  if (job->printer->state == IPP_PSTATE_PROCESSING)
+    printer_state = IPP_PSTATE_IDLE;
   else
     printer_state = job->printer->state;
 
   switch (job_state = job->state_value)
   {
-    case IPP_JOB_PENDING :
+    case IPP_JSTATE_PENDING :
         message = "Job paused.";
 	break;
 
-    case IPP_JOB_HELD :
+    case IPP_JSTATE_HELD :
         message = "Job held.";
 	break;
 
     default :
-    case IPP_JOB_PROCESSING :
-    case IPP_JOB_COMPLETED :
-	job_state = IPP_JOB_COMPLETED;
+    case IPP_JSTATE_PROCESSING :
+    case IPP_JSTATE_COMPLETED :
+	job_state = IPP_JSTATE_COMPLETED;
 	message   = "Job completed.";
 
         if (!job->status)
@@ -3195,19 +3180,19 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 		       "job-completed-successfully");
         break;
 
-    case IPP_JOB_STOPPED :
+    case IPP_JSTATE_STOPPED :
         message = "Job stopped.";
 
 	ippSetString(job->attrs, &job->reasons, 0, "job-stopped");
 	break;
 
-    case IPP_JOB_CANCELED :
+    case IPP_JSTATE_CANCELED :
         message = "Job canceled.";
 
 	ippSetString(job->attrs, &job->reasons, 0, "job-canceled-by-user");
 	break;
 
-    case IPP_JOB_ABORTED :
+    case IPP_JSTATE_ABORTED :
         message = "Job aborted.";
 	break;
   }
@@ -3268,9 +3253,9 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 	    * another printer...
 	    */
 
-            if (job_state == IPP_JOB_COMPLETED)
+            if (job_state == IPP_JSTATE_COMPLETED)
 	    {
-	      job_state = IPP_JOB_PENDING;
+	      job_state = IPP_JSTATE_PENDING;
 	      message   = "Retrying job on another printer.";
 
 	      ippSetString(job->attrs, &job->reasons, 0,
@@ -3284,9 +3269,9 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 	    * and we'll retry on the same printer...
 	    */
 
-            if (job_state == IPP_JOB_COMPLETED)
+            if (job_state == IPP_JSTATE_COMPLETED)
 	    {
-	      job_state = IPP_JOB_PENDING;
+	      job_state = IPP_JSTATE_PENDING;
 	      message   = "Retrying job on same printer.";
 
 	      ippSetString(job->attrs, &job->reasons, 0, "none");
@@ -3295,7 +3280,7 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 	  else if ((job->printer->type & CUPS_PRINTER_FAX) ||
         	   !strcmp(job->printer->error_policy, "retry-job"))
 	  {
-            if (job_state == IPP_JOB_COMPLETED)
+            if (job_state == IPP_JSTATE_COMPLETED)
 	    {
 	     /*
 	      * The job was queued on a fax or the error policy is "retry-job" -
@@ -3314,7 +3299,7 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 		snprintf(buffer, sizeof(buffer),
 			 "Job aborted after %d unsuccessful attempts.",
 			 JobRetryLimit);
-		job_state = IPP_JOB_ABORTED;
+		job_state = IPP_JSTATE_ABORTED;
 		message   = buffer;
 
 		ippSetString(job->attrs, &job->reasons, 0, "aborted-by-system");
@@ -3330,7 +3315,7 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 			 JobRetryInterval);
 
 		job->hold_until = time(NULL) + JobRetryInterval;
-		job_state       = IPP_JOB_HELD;
+		job_state       = IPP_JSTATE_HELD;
 		message         = buffer;
 
 		ippSetString(job->attrs, &job->reasons, 0,
@@ -3339,9 +3324,9 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
             }
 	  }
 	  else if (!strcmp(job->printer->error_policy, "abort-job") &&
-	           job_state == IPP_JOB_COMPLETED)
+	           job_state == IPP_JSTATE_COMPLETED)
 	  {
-	    job_state = IPP_JOB_ABORTED;
+	    job_state = IPP_JSTATE_ABORTED;
 
 	    if (ErrorLog)
 	    {
@@ -3353,10 +3338,10 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 
 	    ippSetString(job->attrs, &job->reasons, 0, "aborted-by-system");
 	  }
-	  else if (job->state_value == IPP_JOB_PROCESSING)
+	  else if (job->state_value == IPP_JSTATE_PROCESSING)
           {
-            job_state     = IPP_JOB_PENDING;
-	    printer_state = IPP_PRINTER_STOPPED;
+            job_state     = IPP_JSTATE_PENDING;
+	    printer_state = IPP_PSTATE_STOPPED;
 
 	    if (ErrorLog)
 	    {
@@ -3375,9 +3360,9 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 	  * Cancel the job...
 	  */
 
-	  if (job_state == IPP_JOB_COMPLETED)
+	  if (job_state == IPP_JSTATE_COMPLETED)
 	  {
-	    job_state = IPP_JOB_CANCELED;
+	    job_state = IPP_JSTATE_CANCELED;
 	    message   = "Job canceled at printer.";
 
 	    ippSetString(job->attrs, &job->reasons, 0, "canceled-at-device");
@@ -3385,7 +3370,7 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
           break;
 
       case CUPS_BACKEND_HOLD :
-	  if (job_state == IPP_JOB_COMPLETED)
+	  if (job_state == IPP_JSTATE_COMPLETED)
 	  {
 	   /*
 	    * Hold the job...
@@ -3436,7 +3421,7 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 	      message = "Job held indefinitely - account authorization failed.";
 	    }
 
-	    job_state = IPP_JOB_HELD;
+	    job_state = IPP_JSTATE_HELD;
           }
           break;
 
@@ -3451,7 +3436,7 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
             break;
 	  }
 
-	  printer_state = IPP_PRINTER_STOPPED;
+	  printer_state = IPP_PSTATE_STOPPED;
 
 	  if (ErrorLog)
 	  {
@@ -3461,9 +3446,9 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 	  else
 	    message = "Printer stopped due to backend errors.";
 
-	  if (job_state == IPP_JOB_COMPLETED)
+	  if (job_state == IPP_JSTATE_COMPLETED)
 	  {
-	    job_state = IPP_JOB_PENDING;
+	    job_state = IPP_JSTATE_PENDING;
 
 	    ippSetString(job->attrs, &job->reasons, 0, "resources-are-not-ready");
 	  }
@@ -3474,11 +3459,11 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 	  * Hold the job for authentication...
 	  */
 
-	  if (job_state == IPP_JOB_COMPLETED)
+	  if (job_state == IPP_JSTATE_COMPLETED)
 	  {
 	    cupsdSetJobHoldUntil(job, "auth-info-required", 1);
 
-	    job_state = IPP_JOB_HELD;
+	    job_state = IPP_JSTATE_HELD;
 	    message   = "Job held for authentication.";
 
             if (strncmp(job->reasons->values[0].string.text, "account-", 8))
@@ -3494,7 +3479,7 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
           break;
 
       case CUPS_BACKEND_RETRY :
-	  if (job_state == IPP_JOB_COMPLETED)
+	  if (job_state == IPP_JSTATE_COMPLETED)
 	  {
 	   /*
 	    * Hold the job if the number of retries is less than the
@@ -3512,7 +3497,7 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 	      snprintf(buffer, sizeof(buffer),
 		       "Job aborted after %d unsuccessful attempts.",
 		       JobRetryLimit);
-	      job_state = IPP_JOB_ABORTED;
+	      job_state = IPP_JSTATE_ABORTED;
 	      message   = buffer;
 
 	      ippSetString(job->attrs, &job->reasons, 0, "aborted-by-system");
@@ -3528,7 +3513,7 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 		       JobRetryInterval);
 
 	      job->hold_until = time(NULL) + JobRetryInterval;
-	      job_state       = IPP_JOB_HELD;
+	      job_state       = IPP_JSTATE_HELD;
 	      message         = buffer;
 
 	      ippSetString(job->attrs, &job->reasons, 0,
@@ -3542,9 +3527,9 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
 	  * Mark the job as pending and retry on the same printer...
 	  */
 
-	  if (job_state == IPP_JOB_COMPLETED)
+	  if (job_state == IPP_JSTATE_COMPLETED)
 	  {
-	    job_state = IPP_JOB_PENDING;
+	    job_state = IPP_JSTATE_PENDING;
 	    message   = "Retrying job on same printer.";
 
 	    ippSetString(job->attrs, &job->reasons, 0, "none");
@@ -3558,9 +3543,9 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
     * Filter had errors; stop job...
     */
 
-    if (job_state == IPP_JOB_COMPLETED)
+    if (job_state == IPP_JSTATE_COMPLETED)
     {
-      job_state = IPP_JOB_STOPPED;
+      job_state = IPP_JSTATE_STOPPED;
 
       if (ErrorLog)
       {
@@ -3585,14 +3570,14 @@ finalize_job(cupsd_job_t *job,		/* I - Job */
     cupsdSetJobState(job, job_state, CUPSD_JOB_DEFAULT, "%s", message);
 
   cupsdSetPrinterState(job->printer, printer_state,
-                       printer_state == IPP_PRINTER_STOPPED);
+                       printer_state == IPP_PSTATE_STOPPED);
   update_job_attrs(job, 0);
 
   if (job->history)
   {
     if (job->status &&
-        (job->state_value == IPP_JOB_ABORTED ||
-         job->state_value == IPP_JOB_STOPPED))
+        (job->state_value == IPP_JSTATE_ABORTED ||
+         job->state_value == IPP_JSTATE_STOPPED))
       dump_job_history(job);
     else
       free_job_history(job);
@@ -3933,7 +3918,7 @@ get_options(cupsd_job_t *job,		/* I - Job */
   *optptr = '\0';
 
   snprintf(title, title_size, "%s-%d", job->printer->name, job->id);
-  strlcpy(copies, "1", copies_size);
+  cupsCopyString(copies, "1", copies_size);
 
   for (attr = job->attrs->attrs; attr != NULL; attr = attr->next)
   {
@@ -3950,7 +3935,7 @@ get_options(cupsd_job_t *job,		/* I - Job */
     else if (!strcmp(attr->name, "job-name") &&
 	     (attr->value_tag == IPP_TAG_NAME ||
 	      attr->value_tag == IPP_TAG_NAMELANG))
-      strlcpy(title, attr->values[0].string.text, title_size);
+      cupsCopyString(title, attr->values[0].string.text, title_size);
     else if (attr->group_tag == IPP_TAG_JOB)
     {
      /*
@@ -4009,18 +3994,18 @@ get_options(cupsd_job_t *job,		/* I - Job */
       */
 
       if (optptr > options)
-	strlcat(optptr, " ", optlength - (size_t)(optptr - options));
+	cupsConcatString(optptr, " ", optlength - (size_t)(optptr - options));
 
       if (attr->value_tag != IPP_TAG_BOOLEAN)
       {
-	strlcat(optptr, attr->name, optlength - (size_t)(optptr - options));
-	strlcat(optptr, "=", optlength - (size_t)(optptr - options));
+	cupsConcatString(optptr, attr->name, optlength - (size_t)(optptr - options));
+	cupsConcatString(optptr, "=", optlength - (size_t)(optptr - options));
       }
 
       for (i = 0; i < attr->num_values; i ++)
       {
 	if (i)
-	  strlcat(optptr, ",", optlength - (size_t)(optptr - options));
+	  cupsConcatString(optptr, ",", optlength - (size_t)(optptr - options));
 
 	optptr += strlen(optptr);
 
@@ -4034,9 +4019,9 @@ get_options(cupsd_job_t *job,		/* I - Job */
 
 	  case IPP_TAG_BOOLEAN :
 	      if (!attr->values[i].boolean)
-		strlcat(optptr, "no", optlength - (size_t)(optptr - options));
+		cupsConcatString(optptr, "no", optlength - (size_t)(optptr - options));
 
-	      strlcat(optptr, attr->name, optlength - (size_t)(optptr - options));
+	      cupsConcatString(optptr, attr->name, optlength - (size_t)(optptr - options));
 	      break;
 
 	  case IPP_TAG_RANGE :
@@ -4129,10 +4114,10 @@ get_options(cupsd_job_t *job,		/* I - Job */
   for (i = num_pwgppds, pwgppd = pwgppds; i > 0; i --, pwgppd ++)
   {
     *optptr++ = ' ';
-    strlcpy(optptr, pwgppd->name, optlength - (size_t)(optptr - options));
+    cupsCopyString(optptr, pwgppd->name, optlength - (size_t)(optptr - options));
     optptr += strlen(optptr);
     *optptr++ = '=';
-    strlcpy(optptr, pwgppd->value, optlength - (size_t)(optptr - options));
+    cupsCopyString(optptr, pwgppd->value, optlength - (size_t)(optptr - options));
     optptr += strlen(optptr);
   }
 
@@ -4392,9 +4377,9 @@ load_job_cache(const char *filename)	/* I - job.cache filename */
     {
       cupsArrayAdd(Jobs, job);
 
-      if (job->state_value <= IPP_JOB_STOPPED && cupsdLoadJob(job))
+      if (job->state_value <= IPP_JSTATE_STOPPED && cupsdLoadJob(job))
 	cupsArrayAdd(ActiveJobs, job);
-      else if (job->state_value > IPP_JOB_STOPPED)
+      else if (job->state_value > IPP_JSTATE_STOPPED)
       {
         if (!job->completed_time || !job->creation_time || !job->name || !job->koctets)
 	{
@@ -4414,10 +4399,10 @@ load_job_cache(const char *filename)	/* I - job.cache filename */
     {
       job->state_value = (ipp_jstate_t)atoi(value);
 
-      if (job->state_value < IPP_JOB_PENDING)
-        job->state_value = IPP_JOB_PENDING;
-      else if (job->state_value > IPP_JOB_COMPLETED)
-        job->state_value = IPP_JOB_COMPLETED;
+      if (job->state_value < IPP_JSTATE_PENDING)
+        job->state_value = IPP_JSTATE_PENDING;
+      else if (job->state_value > IPP_JSTATE_COMPLETED)
+        job->state_value = IPP_JSTATE_COMPLETED;
     }
     else if (!_cups_strcasecmp(line, "Name"))
     {
@@ -4684,7 +4669,7 @@ load_request_root(void)
 
 	cupsArrayAdd(Jobs, job);
 
-	if (job->state_value <= IPP_JOB_STOPPED)
+	if (job->state_value <= IPP_JSTATE_STOPPED)
 	  cupsArrayAdd(ActiveJobs, job);
 	else
 	  unload_job(job);
@@ -4825,7 +4810,7 @@ start_job(cupsd_job_t     *job,		/* I - Job ID */
 
 
   cupsdLogMessage(CUPSD_LOG_DEBUG2, "start_job(job=%p(%d), printer=%p(%s))",
-                  job, job->id, printer, printer->name);
+                  (void *)job, job->id, (void *)printer, printer->name);
 
  /*
   * Make sure we have some files around before we try to print...
@@ -4834,7 +4819,7 @@ start_job(cupsd_job_t     *job,		/* I - Job ID */
   if (job->num_files == 0)
   {
     ippSetString(job->attrs, &job->reasons, 0, "aborted-by-system");
-    cupsdSetJobState(job, IPP_JOB_ABORTED, CUPSD_JOB_DEFAULT,
+    cupsdSetJobState(job, IPP_JSTATE_ABORTED, CUPSD_JOB_DEFAULT,
                      "Aborting job because it has no files.");
     return;
   }
@@ -4854,8 +4839,8 @@ start_job(cupsd_job_t     *job,		/* I - Job ID */
     ippSetString(job->attrs, &job->printer_message, 0, "");
 
   ippSetString(job->attrs, &job->reasons, 0, "job-printing");
-  cupsdSetJobState(job, IPP_JOB_PROCESSING, CUPSD_JOB_DEFAULT, NULL);
-  cupsdSetPrinterState(printer, IPP_PRINTER_PROCESSING, 0);
+  cupsdSetJobState(job, IPP_JSTATE_PROCESSING, CUPSD_JOB_DEFAULT, NULL);
+  cupsdSetPrinterState(printer, IPP_PSTATE_PROCESSING, 0);
   cupsdSetPrinterReasons(printer, "-cups-remote-pending,"
 				  "cups-remote-pending-held,"
 				  "cups-remote-processing,"
@@ -4927,7 +4912,7 @@ start_job(cupsd_job_t     *job,		/* I - Job ID */
     cupsdLogJob(job, CUPSD_LOG_DEBUG,
 		"Unable to create job status pipes - %s.", strerror(errno));
 
-    cupsdSetJobState(job, IPP_JOB_STOPPED, CUPSD_JOB_DEFAULT,
+    cupsdSetJobState(job, IPP_JSTATE_STOPPED, CUPSD_JOB_DEFAULT,
 		     "Job stopped because the scheduler could not create the "
 		     "job status pipes.");
 
@@ -4950,7 +4935,7 @@ start_job(cupsd_job_t     *job,		/* I - Job ID */
     cupsdLogJob(job, CUPSD_LOG_DEBUG,
 		"Unable to create back-channel pipes - %s.", strerror(errno));
 
-    cupsdSetJobState(job, IPP_JOB_STOPPED, CUPSD_JOB_DEFAULT,
+    cupsdSetJobState(job, IPP_JSTATE_STOPPED, CUPSD_JOB_DEFAULT,
 		     "Job stopped because the scheduler could not create the "
 		     "back-channel pipes.");
 
@@ -4979,7 +4964,7 @@ start_job(cupsd_job_t     *job,		/* I - Job ID */
     cupsdLogJob(job, CUPSD_LOG_DEBUG,
 		"Unable to create side-channel pipes - %s.", strerror(errno));
 
-    cupsdSetJobState(job, IPP_JOB_STOPPED, CUPSD_JOB_DEFAULT,
+    cupsdSetJobState(job, IPP_JSTATE_STOPPED, CUPSD_JOB_DEFAULT,
 		     "Job stopped because the scheduler could not create the "
 		     "side-channel pipes.");
 
@@ -5025,7 +5010,7 @@ stop_job(cupsd_job_t       *job,	/* I - Job */
   int	i;				/* Looping var */
 
 
-  cupsdLogMessage(CUPSD_LOG_DEBUG2, "stop_job(job=%p(%d), action=%d)", job,
+  cupsdLogMessage(CUPSD_LOG_DEBUG2, "stop_job(job=%p(%d), action=%d)", (void *)job,
                   job->id, action);
 
   FilterLevel -= job->cost;
@@ -5413,7 +5398,7 @@ update_job(cupsd_job_t *job)		/* I - Job to check */
       if (loglevel < CUPSD_LOG_DEBUG &&
           strcmp(job->printer->state_message, ptr))
       {
-	strlcpy(job->printer->state_message, ptr,
+	cupsCopyString(job->printer->state_message, ptr,
 		sizeof(job->printer->state_message));
 
 	event |= CUPSD_EVENT_PRINTER_STATE | CUPSD_EVENT_JOB_PROGRESS;
@@ -5492,7 +5477,7 @@ update_job(cupsd_job_t *job)		/* I - Job to check */
     * Try printing another job...
     */
 
-    if (printer->state != IPP_PRINTER_STOPPED)
+    if (printer->state != IPP_PSTATE_STOPPED)
       cupsdCheckJobs();
   }
 }
@@ -5535,7 +5520,7 @@ update_job_attrs(cupsd_job_t *job,	/* I - Job to update */
   * Copy or clear the printer-state-message value as needed...
   */
 
-  if (job->state_value != IPP_JOB_PROCESSING &&
+  if (job->state_value != IPP_JSTATE_PROCESSING &&
       job->status_level == CUPSD_LOG_INFO)
   {
     ippSetString(job->attrs, &job->printer_message, 0, "");

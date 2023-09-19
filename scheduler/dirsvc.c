@@ -36,7 +36,6 @@ static int	avahi_running = 0;
  * Local functions...
  */
 
-#ifdef HAVE_DNSSD
 static char		*get_auth_info_required(cupsd_printer_t *p,
 			                        char *buffer, size_t bufsize);
 #  ifdef __APPLE__
@@ -73,7 +72,6 @@ static void		dnssdStop(void);
 static void		dnssdUpdate(void);
 #  endif /* HAVE_MDNSRESPONDER */
 static void		dnssdUpdateDNSSDName(int from_callback);
-#endif /* HAVE_DNSSD */
 
 
 /*
@@ -92,7 +90,7 @@ cupsdDeregisterPrinter(
   */
 
   cupsdLogMessage(CUPSD_LOG_DEBUG,
-                  "cupsdDeregisterPrinter(p=%p(%s), removeit=%d)", p, p->name,
+                  "cupsdDeregisterPrinter(p=%p(%s), removeit=%d)", (void *)p, p->name,
 		  removeit);
 
   if (!Browsing || !p->shared ||
@@ -103,10 +101,8 @@ cupsdDeregisterPrinter(
   * Announce the deletion...
   */
 
-#ifdef HAVE_DNSSD
   if (removeit && (BrowseLocalProtocols & BROWSE_DNSSD) && DNSSDMaster)
     dnssdDeregisterPrinter(p, 1, 0);
-#endif /* HAVE_DNSSD */
 }
 
 
@@ -118,17 +114,15 @@ cupsdDeregisterPrinter(
 void
 cupsdRegisterPrinter(cupsd_printer_t *p)/* I - Printer */
 {
-  cupsdLogMessage(CUPSD_LOG_DEBUG, "cupsdRegisterPrinter(p=%p(%s))", p,
+  cupsdLogMessage(CUPSD_LOG_DEBUG, "cupsdRegisterPrinter(p=%p(%s))", (void *)p,
                   p->name);
 
   if (!Browsing || !BrowseLocalProtocols ||
       (p->type & (CUPS_PRINTER_REMOTE | CUPS_PRINTER_SCANNER)))
     return;
 
-#ifdef HAVE_DNSSD
   if ((BrowseLocalProtocols & BROWSE_DNSSD) && DNSSDMaster)
     dnssdRegisterPrinter(p, 0);
-#endif /* HAVE_DNSSD */
 }
 
 
@@ -142,7 +136,6 @@ cupsdStartBrowsing(void)
   if (!Browsing || !BrowseLocalProtocols)
     return;
 
-#ifdef HAVE_DNSSD
   if (BrowseLocalProtocols & BROWSE_DNSSD)
   {
 #  ifdef HAVE_MDNSRESPONDER
@@ -218,7 +211,6 @@ cupsdStartBrowsing(void)
   */
 
   dnssdRegisterAllPrinters(0);
-#endif /* HAVE_DNSSD */
 }
 
 
@@ -232,7 +224,6 @@ cupsdStopBrowsing(void)
   if (!Browsing || !BrowseLocalProtocols)
     return;
 
-#ifdef HAVE_DNSSD
  /*
   * De-register the individual printers
   */
@@ -245,11 +236,9 @@ cupsdStopBrowsing(void)
 
   if ((BrowseLocalProtocols & BROWSE_DNSSD) && DNSSDMaster)
     dnssdStop();
-#endif /* HAVE_DNSSD */
 }
 
 
-#ifdef HAVE_DNSSD
 /*
  * 'cupsdUpdateDNSSDName()' - Update the computer name we use for browsing...
  */
@@ -355,7 +344,7 @@ dnssdBuildTxtRecord(
     */
 
     if ((ptr = DNSSDHostName + strlen(DNSSDHostName) - 1) >= DNSSDHostName && *ptr == '.')
-      strlcpy(admin_hostname, DNSSDHostName, sizeof(admin_hostname));
+      cupsCopyString(admin_hostname, DNSSDHostName, sizeof(admin_hostname));
     else
       snprintf(admin_hostname, sizeof(admin_hostname), "%s.", DNSSDHostName);
   }
@@ -425,7 +414,7 @@ dnssdBuildTxtRecord(
       if (ptr > urf_str && ptr < (urf_str + sizeof(urf_str) - 1))
 	*ptr++ = ',';
 
-      strlcpy(ptr, value, sizeof(urf_str) - (size_t)(ptr - urf_str));
+      cupsCopyString(ptr, value, sizeof(urf_str) - (size_t)(ptr - urf_str));
       ptr += strlen(ptr);
 
       if (ptr >= (urf_str + sizeof(urf_str) - 1))
@@ -705,7 +694,7 @@ dnssdDeregisterPrinter(
 
 {
   cupsdLogMessage(CUPSD_LOG_DEBUG2,
-                  "dnssdDeregisterPrinter(p=%p(%s), clear_name=%d)", p, p->name,
+                  "dnssdDeregisterPrinter(p=%p(%s), clear_name=%d)", (void *)p, p->name,
                   clear_name);
 
   if (p->ipp_srv)
@@ -1045,7 +1034,7 @@ dnssdRegisterInstance(
   if (subtypes)
     snprintf(temp, sizeof(temp), "%s,%s", type, subtypes);
   else
-    strlcpy(temp, type, sizeof(temp));
+    cupsCopyString(temp, type, sizeof(temp));
 
   *srv  = DNSSDMaster;
   error = DNSServiceRegister(srv, kDNSServiceFlagsShareConnection,
@@ -1079,7 +1068,7 @@ dnssdRegisterInstance(
     char	*start,			/* Start of subtype */
 		subtype[256];		/* Subtype string */
 
-    strlcpy(temp, subtypes, sizeof(temp));
+    cupsCopyString(temp, subtypes, sizeof(temp));
 
     for (start = temp; *start; start = ptr)
     {
@@ -1190,15 +1179,15 @@ dnssdRegisterPrinter(
       if (DNSSDComputerName)
 	snprintf(name, sizeof(name), "%s @ %s", p->info, DNSSDComputerName);
       else
-	strlcpy(name, p->info, sizeof(name));
+	cupsCopyString(name, p->info, sizeof(name));
     }
     else if (DNSSDComputerName)
       snprintf(name, sizeof(name), "%s @ %s", p->name, DNSSDComputerName);
     else
-      strlcpy(name, p->name, sizeof(name));
+      cupsCopyString(name, p->name, sizeof(name));
   }
   else
-    strlcpy(name, p->reg_name, sizeof(name));
+    cupsCopyString(name, p->reg_name, sizeof(name));
 
  /*
   * Register IPP and LPD...
@@ -1526,7 +1515,7 @@ dnssdUpdateDNSSDName(int from_callback)	/* I - Called from callback? */
     if (DNSSDComputerName)
       snprintf(webif, sizeof(webif), "CUPS @ %s", DNSSDComputerName);
     else
-      strlcpy(webif, "CUPS", sizeof(webif));
+      cupsCopyString(webif, "CUPS", sizeof(webif));
 
     dnssdDeregisterInstance(&WebIFSrv, from_callback);
     dnssdRegisterInstance(&WebIFSrv, NULL, webif, "_http._tcp", "_printer", DNSSDPort, NULL, 1, from_callback);
@@ -1565,7 +1554,7 @@ get_auth_info_required(
       if (i)
 	*bufptr++ = ',';
 
-      strlcpy(bufptr, p->auth_info_required[i], bufsize - (size_t)(bufptr - buffer));
+      cupsCopyString(bufptr, p->auth_info_required[i], bufsize - (size_t)(bufptr - buffer));
       bufptr += strlen(bufptr);
     }
 
@@ -1581,9 +1570,9 @@ get_auth_info_required(
   else
     snprintf(resource, sizeof(resource), "/printers/%s", p->name);
 
-  if ((auth = cupsdFindBest(resource, HTTP_POST)) == NULL ||
+  if ((auth = cupsdFindBest(resource, HTTP_STATE_POST)) == NULL ||
       auth->type == CUPSD_AUTH_NONE)
-    auth = cupsdFindPolicyOp(p->op_policy_ptr, IPP_PRINT_JOB);
+    auth = cupsdFindPolicyOp(p->op_policy_ptr, IPP_OP_PRINT_JOB);
 
   if (auth)
   {
@@ -1598,11 +1587,11 @@ get_auth_info_required(
           return (NULL);
 
       case CUPSD_AUTH_NEGOTIATE :
-	  strlcpy(buffer, "negotiate", bufsize);
+	  cupsCopyString(buffer, "negotiate", bufsize);
 	  break;
 
       default :
-	  strlcpy(buffer, "username,password", bufsize);
+	  cupsCopyString(buffer, "username,password", bufsize);
 	  break;
     }
 
@@ -1611,4 +1600,3 @@ get_auth_info_required(
 
   return ("none");
 }
-#endif /* HAVE_DNSSD */

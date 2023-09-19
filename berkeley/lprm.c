@@ -66,7 +66,7 @@ main(int  argc,			/* I - Number of command-line arguments */
 	switch (*opt)
 	{
 	  case 'E' : /* Encrypt */
-	      cupsSetEncryption(HTTP_ENCRYPT_REQUIRED);
+	      cupsSetEncryption(HTTP_ENCRYPTION_REQUIRED);
 	      break;
 
 	  case 'P' : /* Cancel jobs on a printer */
@@ -185,9 +185,9 @@ main(int  argc,			/* I - Number of command-line arguments */
 	goto error;
       }
 
-      if (cupsCancelJob2(CUPS_HTTP_DEFAULT, name, job_id, 0) != IPP_OK)
+      if (cupsCancelJob2(CUPS_HTTP_DEFAULT, name, job_id, 0) != IPP_STATUS_OK)
       {
-        _cupsLangPrintf(stderr, "%s: %s", argv[0], cupsLastErrorString());
+        _cupsLangPrintf(stderr, "%s: %s", argv[0], cupsGetErrorString());
 	goto error;
       }
 
@@ -200,9 +200,9 @@ main(int  argc,			/* I - Number of command-line arguments */
   * (or default) printer...
   */
 
-  if (!did_cancel && cupsCancelJob2(CUPS_HTTP_DEFAULT, name, 0, 0) != IPP_OK)
+  if (!did_cancel && cupsCancelJob2(CUPS_HTTP_DEFAULT, name, 0, 0) != IPP_STATUS_OK)
     {
-      _cupsLangPrintf(stderr, "%s: %s", argv[0], cupsLastErrorString());
+      _cupsLangPrintf(stderr, "%s: %s", argv[0], cupsGetErrorString());
       goto error;
     }
 

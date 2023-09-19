@@ -60,7 +60,7 @@ cupsGetDevices(
   * Range check input...
   */
 
-  DEBUG_printf(("cupsGetDevices(http=%p, timeout=%d, include_schemes=\"%s\", exclude_schemes=\"%s\", callback=%p, user_data=%p)", (void *)http, timeout, include_schemes, exclude_schemes, (void *)callback, user_data));
+  DEBUG_printf("cupsGetDevices(http=%p, timeout=%d, include_schemes=\"%s\", exclude_schemes=\"%s\", callback=%p, user_data=%p)", (void *)http, timeout, include_schemes, exclude_schemes, (void *)callback, user_data);
 
   if (!callback)
     return (IPP_STATUS_ERROR_INTERNAL);
@@ -146,14 +146,14 @@ cupsGetDevices(
   while (status == HTTP_STATUS_UNAUTHORIZED ||
          status == HTTP_STATUS_UPGRADE_REQUIRED);
 
-  DEBUG_printf(("2cupsGetDevices: status=%d", status));
+  DEBUG_printf("2cupsGetDevices: status=%d", status);
 
   ippDelete(request);
 
   if (status != HTTP_STATUS_OK)
   {
     _cupsSetHTTPError(status);
-    return (cupsLastError());
+    return (cupsGetError());
   }
 
  /*
@@ -179,7 +179,7 @@ cupsGetDevices(
     if ((state = ippRead(http, response)) == IPP_STATE_ERROR)
       break;
 
-    DEBUG_printf(("2cupsGetDevices: state=%d, response->last=%p", state, (void *)response->last));
+    DEBUG_printf("2cupsGetDevices: state=%d, response->last=%p", state, (void *)response->last);
 
     if (!response->attrs)
       continue;
@@ -191,8 +191,7 @@ cupsGetDevices(
       else
         attr = attr->next;
 
-      DEBUG_printf(("2cupsGetDevices: attr->name=\"%s\", attr->value_tag=%d",
-                    attr->name, attr->value_tag));
+      DEBUG_printf("2cupsGetDevices: attr->name=\"%s\", attr->value_tag=%d", attr->name, attr->value_tag);
 
       if (!attr->name)
       {
@@ -231,7 +230,7 @@ cupsGetDevices(
   }
   while (state != IPP_STATE_DATA);
 
-  DEBUG_printf(("2cupsGetDevices: state=%d, response->last=%p", state, (void *)response->last));
+  DEBUG_printf("2cupsGetDevices: state=%d, response->last=%p", state, (void *)response->last);
 
   if (device_class && device_id && device_info && device_make_and_model &&
       device_uri)
@@ -247,14 +246,12 @@ cupsGetDevices(
 
   attr = ippFindAttribute(response, "status-message", IPP_TAG_TEXT);
 
-  DEBUG_printf(("cupsGetDevices: status-code=%s, status-message=\"%s\"",
-                ippErrorString(response->request.status.status_code),
-                attr ? attr->values[0].string.text : ""));
+  DEBUG_printf("cupsGetDevices: status-code=%s, status-message=\"%s\"", ippErrorString(response->request.status.status_code), attr ? attr->values[0].string.text : "");
 
   _cupsSetError(response->request.status.status_code,
                 attr ? attr->values[0].string.text : ippErrorString(response->request.status.status_code), 0);
 
   ippDelete(response);
 
-  return (cupsLastError());
+  return (cupsGetError());
 }
