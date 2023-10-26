@@ -131,6 +131,7 @@ OBJS	=	\
 
 COREHEADERS	=	\
 		array.h \
+		base.h \
 		cups.h \
 		dir.h \
 		dnssd.h \
@@ -144,8 +145,7 @@ COREHEADERS	=	\
 		pwg.h \
 		raster.h \
 		thread.h \
-		transcode.h \
-		versioning.h
+		transcode.h
 
 DRIVERHEADERS	=	\
 		adminutil.h \
@@ -238,7 +238,7 @@ libs:		$(LIBTARGETS)
 #
 
 test:		unittests
-	echo "Tests started at $(date)..." >test.log
+	echo "Tests started at $$(date)..." >test.log
 	echo Running array API tests...
 	./testarray >>test.log
 	echo Running file API tests...
@@ -278,7 +278,7 @@ test:		unittests
 	./testtestpage >>test.log
 #	echo Fuzzing IPP API...
 #	./fuzzipp >>test.log
-	echo "Tests finished at $(date)..." >>test.log
+	echo "Tests finished at $$(date)..." >>test.log
 
 
 #
