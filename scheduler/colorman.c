@@ -1014,7 +1014,7 @@ colord_create_profile(
   DBusError	error;			/* D-Bus error */
   char		*idstr;			/* Profile ID string */
   size_t	idstrlen;		/* Profile ID allocated length */
-  const char	*profile_path;		/* Device object path */
+  char		*profile_path;		/* Device object path */
   char		format_str[1024];	/* Qualifier format as a string */
 
 
@@ -1080,7 +1080,7 @@ colord_create_profile(
 
   dbus_message_iter_get_basic(&args, &profile_path);
   cupsdLogMessage(CUPSD_LOG_DEBUG, "Created profile \"%s\".", profile_path);
-  cupsArrayAdd(profiles, strdup(profile_path));
+  cupsArrayAdd(profiles, profile_path);
 
 out:
 
