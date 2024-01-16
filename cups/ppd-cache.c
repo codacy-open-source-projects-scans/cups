@@ -1,7 +1,7 @@
 /*
  * PPD cache implementation for CUPS.
  *
- * Copyright © 2021-2023 by OpenPrinting.
+ * Copyright © 2022-2024 by OpenPrinting.
  * Copyright © 2010-2021 by Apple Inc.
  *
  * Licensed under Apache License v2.0.  See the file "LICENSE" for more
@@ -1284,7 +1284,9 @@ _ppdCacheCreateWithPPD(ppd_file_t *ppd)	/* I - PPD file */
 	 i --, choice ++, map ++)
     {
       if (!_cups_strncasecmp(choice->choice, "Auto", 4) ||
-          !_cups_strcasecmp(choice->choice, "Default"))
+          !_cups_strncasecmp(choice->text, "Auto", 4) ||
+          !_cups_strcasecmp(choice->choice, "Default") ||
+          !_cups_strcasecmp(choice->text, "Default"))
         pwg_name = "auto";
       else if (!_cups_strcasecmp(choice->choice, "Cassette"))
         pwg_name = "main";
@@ -1308,6 +1310,26 @@ _ppdCacheCreateWithPPD(ppd_file_t *ppd)	/* I - PPD file */
         pwg_name = "side";
       else if (!_cups_strcasecmp(choice->choice, "Roll"))
         pwg_name = "main-roll";
+      else if (!_cups_strcasecmp(choice->choice, "0"))
+        pwg_name = "tray-1";
+      else if (!_cups_strcasecmp(choice->choice, "1"))
+        pwg_name = "tray-2";
+      else if (!_cups_strcasecmp(choice->choice, "2"))
+        pwg_name = "tray-3";
+      else if (!_cups_strcasecmp(choice->choice, "3"))
+        pwg_name = "tray-4";
+      else if (!_cups_strcasecmp(choice->choice, "4"))
+        pwg_name = "tray-5";
+      else if (!_cups_strcasecmp(choice->choice, "5"))
+        pwg_name = "tray-6";
+      else if (!_cups_strcasecmp(choice->choice, "6"))
+        pwg_name = "tray-7";
+      else if (!_cups_strcasecmp(choice->choice, "7"))
+        pwg_name = "tray-8";
+      else if (!_cups_strcasecmp(choice->choice, "8"))
+        pwg_name = "tray-9";
+      else if (!_cups_strcasecmp(choice->choice, "9"))
+        pwg_name = "tray-10";
       else
       {
        /*
