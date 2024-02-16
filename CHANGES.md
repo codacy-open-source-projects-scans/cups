@@ -13,6 +13,7 @@ Changes in CUPS v2.5b1 (TBA)
 - Added a new argument value for `lpstat` argument '-W' - `successful` -
   to get successfully printed jobs (Issue #830)
 - Added driver filter to web interface (Issue #848)
+- Added support for PAM modules password-auth and system-auth (Issue #892)
 - Updated CUPS to require TLS support - OpenSSL, GNUTLS and LibreSSL are
   supported.
 - Updated CUPS to require ZLIB.
@@ -25,6 +26,8 @@ Changes in CUPS v2.5b1 (TBA)
   handling (fixes CVE-2023-34241)
 - Fixed hanging of `lpstat` on Solaris (Issue #156)
 - Fixed Digest authentication support (Issue #260)
+- Fixed the web interface not showing an error for a non-existent printer
+  (Issue #423)
 - Fixed extensive looping in scheduler (Issue #604)
 - Fixed printing multiple files on specific printers (Issue #643)
 - Fixed printing of jobs with job name longer than 255 chars on older printers (Issue #644)
@@ -49,6 +52,7 @@ Changes in CUPS v2.5b1 (TBA)
 - Fixed IPP backend to support the "print-scaling" option with IPP printers
   (Issue #862)
 - Fixed Oki 407 freeze when printing larger jobs (Issue #877)
+- Fixed checking for required attributes during PPD generation (Issue #890)
 - Removed hash support for SHA2-512-224 and SHA2-512-256.
 - Removed `mantohtml` script for generating html pages (use
   `https://www.msweet.org/mantohtml/`)
