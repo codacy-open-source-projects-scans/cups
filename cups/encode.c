@@ -546,8 +546,25 @@ _cupsEncodeOption(
 
     switch (attr->value_tag)
     {
-      case IPP_TAG_INTEGER :
       case IPP_TAG_ENUM :
+          if (isalpha(*val & 255))
+          {
+            // Map enum keyword to integer value...
+            int enumvalue;		// Enumeration value
+
+            if ((enumvalue = ippEnumValue(name, val)) > 0)
+            {
+              ippSetInteger(ipp, &attr, i, enumvalue);
+	    }
+	    else
+	    {
+	      ippDeleteAttribute(ipp, attr);
+	      return (NULL);
+	    }
+            break;
+	  }
+
+      case IPP_TAG_INTEGER :
 	 /*
 	  * Integer/enumeration value...
 	  */

@@ -98,8 +98,6 @@ typedef struct
   http_encryption_t	encryption;	/* To encrypt or not to encrypt... */
 } cupsd_location_t;
 
-typedef struct cupsd_client_s cupsd_client_t;
-
 
 /*
  * Globals...
@@ -131,6 +129,6 @@ extern cupsd_location_t	*cupsdCopyLocation(cupsd_location_t *loc);
 extern void		cupsdDeleteAllLocations(void);
 extern cupsd_location_t	*cupsdFindBest(const char *path, http_state_t state);
 extern cupsd_location_t	*cupsdFindLocation(const char *location);
-extern void		cupsdFreeLocation(cupsd_location_t *loc);
+extern void		cupsdFreeLocation(cupsd_location_t *loc, void *data);
 extern http_status_t	cupsdIsAuthorized(cupsd_client_t *con, const char *owner);
 extern cupsd_location_t	*cupsdNewLocation(const char *location);

@@ -5,8 +5,10 @@ Changes in CUPS v2.5b1 (TBA)
 ----------------------------
 
 - Added `cupsDNSSD` APIs.
-- Added `cupsConcatString` and `cupsCopyString` string APIs.
+- Added `cupsConcatString`, `cupsCopyString`, and `cupsFormatString` string
+  APIs.
 - Added new APIs for form, JSON, JWT, IPP, and raster setup.
+- Added `cupsCopyDestInfo2` API (Issue #586)
 - Added OpenSSL support for `cupsHashData` (Issue #762)
 - Added warning if the device has to do IPP request for 'all,media-col-database'
   in separate requests (Issue #829)
@@ -14,20 +16,33 @@ Changes in CUPS v2.5b1 (TBA)
   to get successfully printed jobs (Issue #830)
 - Added driver filter to web interface (Issue #848)
 - Added support for PAM modules password-auth and system-auth (Issue #892)
+- Added Docker support (Issue #929)
 - Updated CUPS to require TLS support - OpenSSL, GNUTLS and LibreSSL are
   supported.
 - Updated CUPS to require ZLIB.
 - Updated CUPS to require support for `poll` API.
 - Updated `cupsArray` APIs to support modern naming and types.
+- Updated IPP Everywhere printer creation error reporting (Issue #347)
+- Updated internal usage of CUPS array API to include callback pointer even when
+  not used (Issue #674)
+- Updated support for using keyword equivalents for enumerated values like
+  "print-quality" (Issue #734)
 - Updated `cups_enum_dests()` timeout for listing available IPP printers
   (Issue #751)
+- Updated default destination documentation (Issue #819)
 - Updated `httpAddrConnect2()` to handle `POLLHUP` together with `POLLIN` or
   `POLLOUT` (Issue #839)
+- Updated the policies help document with the correct `Order` directive to deny
+  access by default (Issue #844)
+- Updated the "get-printer-attributes-suite.test" test file (Issue #909)
 - Updated `cupsRasterReadPixels` and `cupsRasterWritePixels` to not try reading
   or writing if the number of bytes passed is 0 (Issue #914)
+- The `ippeveprinter` program now supports the `-f` option with `-a`
+  (Issue #759)
 - Fixed use-after-free in `cupsdAcceptClient()` when we log warning during error
   handling (fixes CVE-2023-34241)
 - Fixed hanging of `lpstat` on Solaris (Issue #156)
+- Fixed mapping of PPD InputSlot, MediaType, and OutputBin values (Issue #238)
 - Fixed Digest authentication support (Issue #260)
 - Fixed the web interface not showing an error for a non-existent printer
   (Issue #423)
@@ -56,10 +71,18 @@ Changes in CUPS v2.5b1 (TBA)
   numbers as strings instead of keywords as `InputSlot` values (Issue #859)
 - Fixed IPP backend to support the "print-scaling" option with IPP printers
   (Issue #862)
+- Fixed potential race condition for the creation of temporary queues
+  (Issue #871)
 - Fixed Oki 407 freeze when printing larger jobs (Issue #877)
+- Fixed `httpGets` timeout handling (Issue #879)
 - Fixed checking for required attributes during PPD generation (Issue #890)
+- Fixed pwg-raster-document-resolution-supported and urf-supported values
+  (Issue #901)
 - Fixed encoding of IPv6 addresses in HTTP requests (Issue #903)
 - Fixed encoding of `IPP_TAG_EXTENSION` values in IPP messages (Issue #913)
+- Fixed sending response headers to client (Issue #927)
+- Fixed CGI program initialization and validation of form checkbox and text
+  fields.
 - Removed hash support for SHA2-512-224 and SHA2-512-256.
 - Removed `mantohtml` script for generating html pages (use
   `https://www.msweet.org/mantohtml/`)

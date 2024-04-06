@@ -30,7 +30,7 @@ static cups_array_t	*stringpool = NULL;
  * Local functions...
  */
 
-static int	compare_sp_items(_cups_sp_item_t *a, _cups_sp_item_t *b);
+static int compare_sp_items(_cups_sp_item_t *a, _cups_sp_item_t *b, void *data);
 static void	validate_end(char *s, char *end);
 
 
@@ -1055,11 +1055,16 @@ int				/* O - Result of comparison (-1, 0, or 1) */
 _cups_strcasecmp(const char *s,	/* I - First string */
                  const char *t)	/* I - Second string */
 {
+  int diff;
+
+
   while (*s != '\0' && *t != '\0')
   {
-    if (_cups_tolower(*s) < _cups_tolower(*t))
+    diff = _cups_tolower(*s) - _cups_tolower(*t);
+
+    if (diff < 0)
       return (-1);
-    else if (_cups_tolower(*s) > _cups_tolower(*t))
+    else if (diff > 0)
       return (1);
 
     s ++;
@@ -1074,6 +1079,7 @@ _cups_strcasecmp(const char *s,	/* I - First string */
     return (-1);
 }
 
+
 /*
  * '_cups_strncasecmp()' - Do a case-insensitive comparison on up to N chars.
  */
@@ -1083,11 +1089,15 @@ _cups_strncasecmp(const char *s,	/* I - First string */
                   const char *t,	/* I - Second string */
 		  size_t     n)		/* I - Maximum number of characters to compare */
 {
+  int diff;
+
+
   while (*s != '\0' && *t != '\0' && n > 0)
   {
-    if (_cups_tolower(*s) < _cups_tolower(*t))
+    diff = _cups_tolower(*s) - _cups_tolower(*t);
+    if (diff < 0)
       return (-1);
-    else if (_cups_tolower(*s) > _cups_tolower(*t))
+    else if (diff > 0)
       return (1);
 
     s ++;
@@ -1106,100 +1116,18 @@ _cups_strncasecmp(const char *s,	/* I - First string */
 }
 
 
-#ifndef HAVE_STRLCAT
-/*
- * '_cups_cupsConcatString()' - Safely concatenate two strings.
- */
-
-size_t					/* O - Length of string */
-_cups_cupsConcatString(char       *dst,		/* O - Destination string */
-              const char *src,		/* I - Source string */
-	      size_t     size)		/* I - Size of destination string buffer */
-{
-  size_t	srclen;			/* Length of source string */
-  size_t	dstlen;			/* Length of destination string */
-
-
- /*
-  * Figure out how much room is left...
-  */
-
-  dstlen = strlen(dst);
-
-  if (size < (dstlen + 1))
-    return (dstlen);		        /* No room, return immediately... */
-
-  size -= dstlen + 1;
-
- /*
-  * Figure out how much room is needed...
-  */
-
-  srclen = strlen(src);
-
- /*
-  * Copy the appropriate amount...
-  */
-
-  if (srclen > size)
-    srclen = size;
-
-  memmove(dst + dstlen, src, srclen);
-  dst[dstlen + srclen] = '\0';
-
-  return (dstlen + srclen);
-}
-#endif /* !HAVE_STRLCAT */
-
-
-#ifndef HAVE_STRLCPY
-/*
- * '_cups_cupsCopyString()' - Safely copy two strings.
- */
-
-size_t					/* O - Length of string */
-_cups_cupsCopyString(char       *dst,		/* O - Destination string */
-              const char *src,		/* I - Source string */
-	      size_t      size)		/* I - Size of destination string buffer */
-{
-  size_t	srclen;			/* Length of source string */
-
-
-  if (size == 0)
-    return (0);
-
- /*
-  * Figure out how much room is needed...
-  */
-
-  size --;
-
-  srclen = strlen(src);
-
- /*
-  * Copy the appropriate amount...
-  */
-
-  if (srclen > size)
-    srclen = size;
-
-  memmove(dst, src, srclen);
-  dst[srclen] = '\0';
-
-  return (srclen);
-}
-#endif /* !HAVE_STRLCPY */
-
-
 /*
  * 'compare_sp_items()' - Compare two string pool items...
  */
 
 static int				/* O - Result of comparison */
 compare_sp_items(_cups_sp_item_t *a,	/* I - First item */
-                 _cups_sp_item_t *b)	/* I - Second item */
+                 _cups_sp_item_t *b,	/* I - Second item */
+                 void            *data)         /* I - Unused */
 {
-  return (strcmp(a->str, b->str));
+  (void)data;
+ 
+ return (strcmp(a->str, b->str));
 }
 
 
@@ -1243,4 +1171,18 @@ validate_end(char *s,			// I - Pointer to start of string
       *ptr = '\0';
     }
   }
+}
+
+
+/*
+ * '_cupsArrayStrcasecmp()' - Compare two strings...
+ */
+
+int /* O - Result of comparison */
+_cupsArrayStrcasecmp(const char *s, /* I - First string */
+                         const char *t, /* I - Second string */
+                         void *data)    /* I - Unused */
+{
+  (void)data;
+  return (_cups_strcasecmp(s, t));
 }

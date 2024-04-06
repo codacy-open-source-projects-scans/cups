@@ -515,7 +515,7 @@ cupsdCreateCommonData(void)
   snprintf(filename, sizeof(filename), "%s/notifier", ServerBin);
   if ((dir = cupsDirOpen(filename)) != NULL)
   {
-    notifiers = cupsArrayNew((cups_array_func_t)strcmp, NULL);
+    notifiers = cupsArrayNew((cups_array_func_t)_cupsArrayStrcmp, NULL);
 
     while ((dent = cupsDirRead(dir)) != NULL)
     {
@@ -778,11 +778,11 @@ cupsdDeleteTemporaryPrinters(int force) /* I - Force deletion instead of auto? *
 		  "cupsdDeleteTemporaryPrinters: Removing unused temporary printers");
 
  /*
-  * Allow temporary printers to stick around for 60 seconds after the last job
+  * Allow temporary printers to stick around for 5 minutes after the last job
   * completes.
   */
 
-  unused_time = time(NULL) - 60;
+  unused_time = time(NULL) - 300;
 
   for (p = (cupsd_printer_t *)cupsArrayFirst(Printers); p; p = (cupsd_printer_t *)cupsArrayNext(Printers))
   {
@@ -3281,7 +3281,7 @@ add_printer_defaults(cupsd_printer_t *p)/* I - Printer */
 
   if (!CommonDefaults)
   {
-    CommonDefaults = cupsArrayNew((cups_array_func_t)strcmp, NULL);
+    CommonDefaults = cupsArrayNew((cups_array_func_t)_cupsArrayStrcmp, NULL);
 
     cupsArrayAdd(CommonDefaults, _cupsStrAlloc("copies-default"));
     cupsArrayAdd(CommonDefaults, _cupsStrAlloc("document-format-default"));
@@ -3669,15 +3669,15 @@ add_printer_formats(cupsd_printer_t *p)	/* I - Printer */
  * 'compare_printers()' - Compare two printers.
  */
 
-static int				/* O - Result of comparison */
-compare_printers(void *first,		/* I - First printer */
-                 void *second,		/* I - Second printer */
-		 void *data)		/* I - App data (not used) */
+static int                     /* O - Result of comparison */
+compare_printers(void *first,  /* I - First printer */
+                 void *second, /* I - Second printer */
+                 void *data)   /* I - App data (not used) */
 {
   (void)data;
 
   return (_cups_strcasecmp(((cupsd_printer_t *)first)->name,
-                     ((cupsd_printer_t *)second)->name));
+                           ((cupsd_printer_t *)second)->name));
 }
 
 
@@ -4650,7 +4650,14 @@ load_ppd(cupsd_printer_t *p)		/* I - Printer */
       * Report all supported resolutions...
       */
 
+      ipp_attribute_t *pwg_supported;	/* pwg-raster-document-resolution-supported */
+      char *urf_rsptr = urf_rs;		/* Pointer into RS value */
+
       attr = ippAddResolutions(p->ppd_attrs, IPP_TAG_PRINTER, "printer-resolution-supported", resolution->num_choices, IPP_RES_PER_INCH, NULL, NULL);
+
+      pwg_supported = ippAddResolutions(p->ppd_attrs, IPP_TAG_PRINTER, "pwg-raster-document-resolution-supported", resolution->num_choices, IPP_RES_PER_INCH, NULL, NULL);
+
+      urf_rs[0] = '\0';
 
       for (i = 0, choice = resolution->choices;
            i < resolution->num_choices;
@@ -4668,71 +4675,75 @@ load_ppd(cupsd_printer_t *p)		/* I - Printer */
 	  xdpi = ydpi = 300;
 	}
 
-        attr->values[i].resolution.xres  = xdpi;
-        attr->values[i].resolution.yres  = ydpi;
-        attr->values[i].resolution.units = IPP_RES_PER_INCH;
+        ippSetResolution(p->ppd_attrs, &attr, i, IPP_RES_PER_INCH, xdpi, ydpi);
+        ippSetResolution(p->ppd_attrs, &pwg_supported, i, IPP_RES_PER_INCH, xdpi, ydpi);
 
         if (choice->marked)
 	  ippAddResolution(p->ppd_attrs, IPP_TAG_PRINTER, "printer-resolution-default", IPP_RES_PER_INCH, xdpi, ydpi);
 
-        if (i == 0)
-        {
-	  ippAddResolution(p->ppd_attrs, IPP_TAG_PRINTER, "pwg-raster-document-resolution-supported", IPP_RES_PER_INCH, xdpi, ydpi);
-          snprintf(urf_rs, sizeof(urf_rs), "RS%d", xdpi);
-          urf[num_urf ++] = urf_rs;
-	}
-      }
-    }
-    else if ((ppd_attr = ppdFindAttr(ppd, "DefaultResolution", NULL)) != NULL &&
-             ppd_attr->value)
-    {
-     /*
-      * Just the DefaultResolution to report...
-      */
+        if (xdpi > ydpi)
+          xdpi = ydpi;
 
-      xdpi = ydpi = (int)strtol(ppd_attr->value, (char **)&resptr, 10);
-      if (resptr > ppd_attr->value && xdpi > 0)
-      {
-	if (*resptr == 'x')
-	  ydpi = (int)strtol(resptr + 1, (char **)&resptr, 10);
+        if (!urf_rs[0])
+          snprintf(urf_rsptr, sizeof(urf_rs) - (size_t)(urf_rsptr - urf_rs), "RS%d", xdpi);
 	else
-	  ydpi = xdpi;
-      }
+          snprintf(urf_rsptr, sizeof(urf_rs) - (size_t)(urf_rsptr - urf_rs), "-%d", xdpi);
 
-      if (xdpi <= 0 || ydpi <= 0)
-      {
-	cupsdLogMessage(CUPSD_LOG_WARN,
-			"Bad default resolution \"%s\" for printer %s.",
-			ppd_attr->value, p->name);
-	xdpi = ydpi = 300;
+        urf_rsptr += strlen(urf_rsptr);
       }
-
-      ippAddResolution(p->ppd_attrs, IPP_TAG_PRINTER,
-		       "printer-resolution-default", IPP_RES_PER_INCH,
-		       xdpi, ydpi);
-      ippAddResolution(p->ppd_attrs, IPP_TAG_PRINTER,
-		       "printer-resolution-supported", IPP_RES_PER_INCH,
-		       xdpi, ydpi);
-      ippAddResolution(p->ppd_attrs, IPP_TAG_PRINTER, "pwg-raster-document-resolution-supported", IPP_RES_PER_INCH, xdpi, ydpi);
-      snprintf(urf_rs, sizeof(urf_rs), "RS%d", xdpi);
-      urf[num_urf ++] = urf_rs;
     }
     else
     {
-     /*
-      * No resolutions in PPD - make one up...
-      */
+      if ((ppd_attr = ppdFindAttr(ppd, "DefaultResolution", NULL)) != NULL &&
+             ppd_attr->value)
+      {
+       /*
+	* Just the DefaultResolution to report...
+	*/
+
+	xdpi = ydpi = (int)strtol(ppd_attr->value, (char **)&resptr, 10);
+	if (resptr > ppd_attr->value && xdpi > 0)
+	{
+	  if (*resptr == 'x')
+	    ydpi = (int)strtol(resptr + 1, (char **)&resptr, 10);
+	  else
+	    ydpi = xdpi;
+	}
+
+	if (xdpi <= 0 || ydpi <= 0)
+	{
+	  cupsdLogMessage(CUPSD_LOG_WARN,
+			  "Bad default resolution \"%s\" for printer %s.",
+			  ppd_attr->value, p->name);
+	  xdpi = ydpi = 300;
+	}
+      }
+      else
+      {
+       /*
+	* No resolutions in PPD - use 300dpi...
+	*/
+
+        xdpi = ydpi = 300;
+      }
 
       ippAddResolution(p->ppd_attrs, IPP_TAG_PRINTER,
 		       "printer-resolution-default", IPP_RES_PER_INCH,
-		       300, 300);
+		       xdpi, ydpi);
       ippAddResolution(p->ppd_attrs, IPP_TAG_PRINTER,
 		       "printer-resolution-supported", IPP_RES_PER_INCH,
-		       300, 300);
-      ippAddResolution(p->ppd_attrs, IPP_TAG_PRINTER, "pwg-raster-document-resolution-supported", IPP_RES_PER_INCH, 300, 300);
-      cupsCopyString(urf_rs, "RS300", sizeof(urf_rs));
-      urf[num_urf ++] = urf_rs;
+		       xdpi, ydpi);
+      ippAddResolution(p->ppd_attrs, IPP_TAG_PRINTER,
+		       "pwg-raster-document-resolution-supported", IPP_RES_PER_INCH,
+		       xdpi, ydpi);
+
+      if (xdpi > ydpi)
+	xdpi = ydpi;
+
+      snprintf(urf_rs, sizeof(urf_rs), "RS%d", xdpi);
     }
+
+    urf[num_urf ++] = urf_rs;
 
    /*
     * Duplexing, etc...

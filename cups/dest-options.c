@@ -30,17 +30,17 @@
 static void		cups_add_dconstres(cups_array_t *a, ipp_t *collection);
 static int		cups_collection_contains(ipp_t *test, ipp_t *match);
 static size_t		cups_collection_string(ipp_attribute_t *attr, char *buffer, size_t bufsize) _CUPS_NONNULL((1,2));
-static int		cups_compare_dconstres(_cups_dconstres_t *a,
-			                       _cups_dconstres_t *b);
-static int		cups_compare_media_db(_cups_media_db_t *a,
-			                      _cups_media_db_t *b);
-static _cups_media_db_t	*cups_copy_media_db(_cups_media_db_t *mdb);
+static int cups_compare_dconstres(_cups_dconstres_t *a, _cups_dconstres_t *b,
+                                  void *data);
+static int cups_compare_media_db(_cups_media_db_t *a, _cups_media_db_t *b,
+                                 void *data);
+static _cups_media_db_t *cups_copy_media_db(_cups_media_db_t *mdb, void *data);
 static void		cups_create_cached(http_t *http, cups_dinfo_t *dinfo,
 			                   unsigned flags);
 static void		cups_create_constraints(cups_dinfo_t *dinfo);
 static void		cups_create_defaults(cups_dinfo_t *dinfo);
 static void		cups_create_media_db(cups_dinfo_t *dinfo, unsigned flags);
-static void		cups_free_media_db(_cups_media_db_t *mdb);
+static void		cups_free_media_db(_cups_media_db_t *mdb, void *data);
 static int		cups_get_media_db(http_t *http, cups_dinfo_t *dinfo, pwg_media_t *pwg, unsigned flags, cups_size_t *size, cups_media_t *media);
 static int		cups_is_close_media_db(_cups_media_db_t *a,
 			                       _cups_media_db_t *b);
@@ -259,7 +259,7 @@ cupsCheckDestSupported(
     cups_dest_t  *dest,			/* I - Destination */
     cups_dinfo_t *dinfo,		/* I - Destination information */
     const char   *option,		/* I - Option */
-    const char   *value)		/* I - Value or @code NULL@ */
+    const char   *value)		/* I - Value or `NULL` */
 {
   int			i;		/* Looping var */
   char			temp[1024];	/* Temporary string */
@@ -458,13 +458,13 @@ cupsCheckDestSupported(
  * Returns 1 if there is a conflict, 0 if there are no conflicts, and -1 if
  * there was an unrecoverable error such as a resolver loop.
  *
- * If "num_conflicts" and "conflicts" are not @code NULL@, they are set to
+ * If "num_conflicts" and "conflicts" are not `NULL`, they are set to
  * contain the list of conflicting option/value pairs.  Similarly, if
- * "num_resolved" and "resolved" are not @code NULL@ they will be set to the
+ * "num_resolved" and "resolved" are not `NULL` they will be set to the
  * list of changes needed to resolve the conflict.
  *
  * If cupsCopyDestConflicts returns 1 but "num_resolved" and "resolved" are set
- * to 0 and @code NULL@, respectively, then the conflict cannot be resolved.
+ * to 0 and `NULL`, respectively, then the conflict cannot be resolved.
  *
  * @since CUPS 1.6/macOS 10.8@
  */
@@ -754,9 +754,9 @@ cupsCopyDestConflicts(
  *                        destination.
  *
  * The caller is responsible for calling @link cupsFreeDestInfo@ on the return
- * value. @code NULL@ is returned on error.
+ * value. `NULL` is returned on error.
  *
- * @since CUPS 1.6/macOS 10.8@
+ * @since CUPS 1.6@
  */
 
 cups_dinfo_t *				/* O - Destination information */
@@ -764,18 +764,80 @@ cupsCopyDestInfo(
     http_t      *http,			/* I - Connection to destination */
     cups_dest_t *dest)			/* I - Destination */
 {
+  unsigned	dflags = CUPS_DEST_FLAGS_NONE;
+					/* Destination flags */
+  _cups_globals_t *cg = _cupsGlobals();	/* Pointer to library globals */
+
+
+  DEBUG_printf("cupsCopyDestInfo(http=%p, dest=%p(%s))", (void *)http, (void *)dest, dest ? dest->name : "");
+
+ /*
+  * Range check input...
+  */
+
+  if (!dest)
+    return (NULL);
+
+ /*
+  * Guess the destination flags based on the printer URI's host and port...
+  */
+
+#ifdef AF_LOCAL
+  if (http && httpAddrFamily(http->hostaddr) != AF_LOCAL)
+#else
+  if (http)
+#endif /* AF_LOCAL */
+  {
+    const char	*uri;			/* Printer URI */
+    char	scheme[32],		/* URI scheme */
+		userpass[256],		/* URI username:password */
+		host[256],		/* URI host */
+		resource[1024];		/* URI resource path */
+    int		port;			/* URI port */
+
+    if ((uri = cupsGetOption("printer-uri-supported", dest->num_options, dest->options)) == NULL || httpSeparateURI(HTTP_URI_CODING_ALL, uri, scheme, sizeof(scheme), userpass, sizeof(userpass), host, sizeof(host), &port, resource, sizeof(resource)) < HTTP_URI_STATUS_OK)
+    {
+      cupsCopyString(host, "localhost", sizeof(host));
+      port = cg->ipp_port;
+    }
+
+    if (strcmp(http->hostname, host) || port != httpAddrPort(http->hostaddr))
+    {
+      DEBUG_printf("1cupsCopyDestInfo: Connection to device (%s).", http->hostname);
+      dflags = CUPS_DEST_FLAGS_DEVICE;
+    }
+  }
+
+  return (cupsCopyDestInfo2(http, dest, dflags));
+}
+
+
+/*
+ * 'cupsCopyDestInfo2()' - Get the supported values/capabilities for the
+ *                         destination.
+ *
+ * The caller is responsible for calling @link cupsFreeDestInfo@ on the return
+ * value. `NULL` is returned on error.
+ *
+ * @since CUPS 2.5@
+ */
+
+cups_dinfo_t *				/* O - Destination information */
+cupsCopyDestInfo2(
+    http_t            *http,		/* I - Connection to destination */
+    cups_dest_t       *dest,		/* I - Destination */
+    cups_dest_flags_t dflags)		/* I - Destination flags */
+{
   cups_dinfo_t	*dinfo;			/* Destination information */
-  unsigned	dflags;			/* Destination flags */
   ipp_t		*request,		/* Get-Printer-Attributes request */
 		*response;		/* Supported attributes */
   int		tries,			/* Number of tries so far */
 		delay,			/* Current retry delay */
 		prev_delay;		/* Next retry delay */
   const char	*uri;			/* Printer URI */
-  char		resource[1024];		/* Resource path */
+  char		resource[1024];		/* URI resource path */
   int		version;		/* IPP version */
   ipp_status_t	status;			/* Status of request */
-  _cups_globals_t *cg = _cupsGlobals();	/* Pointer to library globals */
   static const char * const requested_attrs[] =
   {					/* Requested attributes */
     "job-template",
@@ -784,7 +846,14 @@ cupsCopyDestInfo(
   };
 
 
-  DEBUG_printf("cupsCopyDestInfo(http=%p, dest=%p(%s))", (void *)http, (void *)dest, dest ? dest->name : "");
+  DEBUG_printf("cupsCopyDestInfo2(http=%p, dest=%p(%s), dflags=%x)", (void *)http, (void *)dest, dest ? dest->name : "", dflags);
+
+ /*
+  * Range check input...
+  */
+
+  if (!dest)
+    return (NULL);
 
  /*
   * Get the default connection as needed...
@@ -793,33 +862,9 @@ cupsCopyDestInfo(
   if (!http)
   {
     DEBUG_puts("1cupsCopyDestInfo: Default server connection.");
-    http   = _cupsConnect();
-    dflags = CUPS_DEST_FLAGS_NONE;
+    if ((http = _cupsConnect()) == NULL)
+      return (NULL);
   }
-#ifdef AF_LOCAL
-  else if (httpAddrFamily(http->hostaddr) == AF_LOCAL)
-  {
-    DEBUG_puts("1cupsCopyDestInfo: Connection to server (domain socket).");
-    dflags = CUPS_DEST_FLAGS_NONE;
-  }
-#endif /* AF_LOCAL */
-  else if ((strcmp(http->hostname, cg->server) && cg->server[0] != '/') || cg->ipp_port != httpAddrPort(http->hostaddr))
-  {
-    DEBUG_printf("1cupsCopyDestInfo: Connection to device (%s).", http->hostname);
-    dflags = CUPS_DEST_FLAGS_DEVICE;
-  }
-  else
-  {
-    DEBUG_printf("1cupsCopyDestInfo: Connection to server (%s).", http->hostname);
-    dflags = CUPS_DEST_FLAGS_NONE;
-  }
-
- /*
-  * Range check input...
-  */
-
-  if (!http || !dest)
-    return (NULL);
 
  /*
   * Get the printer URI and resource path...
@@ -920,7 +965,7 @@ cupsCopyDestInfo(
  * @since CUPS 1.7/macOS 10.9@
  */
 
-ipp_attribute_t	*			/* O - Default attribute or @code NULL@ for none */
+ipp_attribute_t	*			/* O - Default attribute or `NULL` for none */
 cupsFindDestDefault(
     http_t       *http,			/* I - Connection to destination */
     cups_dest_t  *dest,			/* I - Destination */
@@ -968,7 +1013,7 @@ cupsFindDestDefault(
  * @since CUPS 1.7/macOS 10.9@
  */
 
-ipp_attribute_t	*			/* O - Default attribute or @code NULL@ for none */
+ipp_attribute_t	*			/* O - Default attribute or `NULL` for none */
 cupsFindDestReady(
     http_t       *http,			/* I - Connection to destination */
     cups_dest_t  *dest,			/* I - Destination */
@@ -1018,7 +1063,7 @@ cupsFindDestReady(
  * @since CUPS 1.7/macOS 10.9@
  */
 
-ipp_attribute_t	*			/* O - Default attribute or @code NULL@ for none */
+ipp_attribute_t	*			/* O - Default attribute or `NULL` for none */
 cupsFindDestSupported(
     http_t       *http,			/* I - Connection to destination */
     cups_dest_t  *dest,			/* I - Destination */
@@ -2129,11 +2174,12 @@ cups_collection_string(
  * 'cups_compare_dconstres()' - Compare to resolver entries.
  */
 
-static int				/* O - Result of comparison */
-cups_compare_dconstres(
-    _cups_dconstres_t *a,		/* I - First resolver */
-    _cups_dconstres_t *b)		/* I - Second resolver */
+static int                                   /* O - Result of comparison */
+cups_compare_dconstres(_cups_dconstres_t *a, /* I - First resolver */
+                       _cups_dconstres_t *b, /* I - Second resolver */
+                       void *data)           /* Unused */
 {
+  (void)data;
   return (strcmp(a->name, b->name));
 }
 
@@ -2142,13 +2188,14 @@ cups_compare_dconstres(
  * 'cups_compare_media_db()' - Compare two media entries.
  */
 
-static int				/* O - Result of comparison */
-cups_compare_media_db(
-    _cups_media_db_t *a,		/* I - First media entries */
-    _cups_media_db_t *b)		/* I - Second media entries */
+static int                                 /* O - Result of comparison */
+cups_compare_media_db(_cups_media_db_t *a, /* I - First media entries */
+                      _cups_media_db_t *b, /* I - Second media entries */
+                      void *data)          /* Unused */
 {
   int	result;				/* Result of comparison */
 
+  (void)data;
 
   if ((result = a->width - b->width) == 0)
     result = a->length - b->length;
@@ -2161,12 +2208,13 @@ cups_compare_media_db(
  * 'cups_copy_media_db()' - Copy a media entry.
  */
 
-static _cups_media_db_t *		/* O - New media entry */
-cups_copy_media_db(
-    _cups_media_db_t *mdb)		/* I - Media entry to copy */
+static _cups_media_db_t *                 /* O - New media entry */
+cups_copy_media_db(_cups_media_db_t *mdb, /* I - Media entry to copy */
+                   void *data)            /* Unused */
 {
   _cups_media_db_t *temp;		/* New media entry */
 
+  (void)data;
 
   if ((temp = calloc(1, sizeof(_cups_media_db_t))) == NULL)
     return (NULL);
@@ -2287,12 +2335,9 @@ cups_create_constraints(
   ipp_attribute_t	*attr;		/* Attribute */
   _ipp_value_t		*val;		/* Current value */
 
-
-  dinfo->constraints = cupsArrayNew3(NULL, NULL, NULL, 0, NULL,
-                                     (cups_afree_func_t)free);
-  dinfo->resolvers   = cupsArrayNew3((cups_array_func_t)cups_compare_dconstres,
-				     NULL, NULL, 0, NULL,
-                                     (cups_afree_func_t)free);
+  dinfo->constraints = cupsArrayNew3(NULL, NULL, NULL, 0, NULL, _cupsArrayFree);
+  dinfo->resolvers = cupsArrayNew3((cups_array_func_t)cups_compare_dconstres,
+                                   NULL, NULL, 0, NULL, _cupsArrayFree);
 
   if ((attr = ippFindAttribute(dinfo->attrs, "job-constraints-supported",
 			       IPP_TAG_BEGIN_COLLECTION)) != NULL)
@@ -2651,9 +2696,10 @@ cups_create_media_db(
  */
 
 static void
-cups_free_media_db(
-    _cups_media_db_t *mdb)		/* I - Media entry to free */
+cups_free_media_db(_cups_media_db_t *mdb, /* I - Media entry to free */
+                   void *data)            /* I - Unused */
 {
+  (void)data;
   if (mdb->color)
     _cupsStrFree(mdb->color);
   if (mdb->key)
@@ -2731,11 +2777,11 @@ cups_get_media_db(http_t       *http,	/* I - Connection to destination */
 
       if (best->left != 0 || best->right != 0 || best->top != 0 || best->bottom != 0)
       {
-	for (mdb = (_cups_media_db_t *)cupsArrayNext(db);
-	     mdb && !cups_compare_media_db(mdb, &key);
-	     mdb = (_cups_media_db_t *)cupsArrayNext(db))
-	{
-	  if (mdb->left <= best->left && mdb->right <= best->right &&
+        for (mdb = (_cups_media_db_t *)cupsArrayNext(db);
+             mdb && !cups_compare_media_db(mdb, &key, NULL);
+             mdb = (_cups_media_db_t *)cupsArrayNext(db))
+        {
+          if (mdb->left <= best->left && mdb->right <= best->right &&
 	      mdb->top <= best->top && mdb->bottom <= best->bottom)
 	  {
 	    best = mdb;
@@ -2743,7 +2789,7 @@ cups_get_media_db(http_t       *http,	/* I - Connection to destination */
 		mdb->top == 0)
 	      break;
 	  }
-	}
+        }
       }
 
      /*
@@ -2762,10 +2808,10 @@ cups_get_media_db(http_t       *http,	/* I - Connection to destination */
       */
 
       for (mdb = (_cups_media_db_t *)cupsArrayNext(db);
-	   mdb && !cups_compare_media_db(mdb, &key);
-	   mdb = (_cups_media_db_t *)cupsArrayNext(db))
+           mdb && !cups_compare_media_db(mdb, &key, NULL);
+           mdb = (_cups_media_db_t *)cupsArrayNext(db))
       {
-	if (mdb->left >= best->left && mdb->right >= best->right &&
+        if (mdb->left >= best->left && mdb->right >= best->right &&
 	    mdb->top >= best->top && mdb->bottom >= best->bottom &&
 	    (mdb->bottom != best->bottom || mdb->left != best->left || mdb->right != best->right || mdb->top != best->top))
 	  best = mdb;
@@ -2778,10 +2824,10 @@ cups_get_media_db(http_t       *http,	/* I - Connection to destination */
       */
 
       for (mdb = (_cups_media_db_t *)cupsArrayNext(db);
-	   mdb && !cups_compare_media_db(mdb, &key);
-	   mdb = (_cups_media_db_t *)cupsArrayNext(db))
+           mdb && !cups_compare_media_db(mdb, &key, NULL);
+           mdb = (_cups_media_db_t *)cupsArrayNext(db))
       {
-	if (((mdb->left > 0 && mdb->left <= best->left) || best->left == 0) &&
+        if (((mdb->left > 0 && mdb->left <= best->left) || best->left == 0) &&
 	    ((mdb->right > 0 && mdb->right <= best->right) || best->right == 0) &&
 	    ((mdb->top > 0 && mdb->top <= best->top) || best->top == 0) &&
 	    ((mdb->bottom > 0 && mdb->bottom <= best->bottom) || best->bottom == 0) &&

@@ -101,6 +101,15 @@ extern const char *cups_hstrerror(int);
 
 
 /*
+ * Base types...
+ */
+
+typedef struct cupsd_client_s cupsd_client_t;
+typedef struct cupsd_job_s cupsd_job_t;
+typedef struct cupsd_printer_s cupsd_printer_t;
+
+
+/*
  * Other stuff for the scheduler...
  */
 
@@ -221,3 +230,7 @@ extern void		cupsdStopSelect(void);
 /* server.c */
 extern void		cupsdStartServer(void);
 extern void		cupsdStopServer(void);
+
+extern int		_cupsArrayStrcmp(const char *s1, const char *s2, void *data);
+extern char		*_cupsArrayStrdup(const char *element, void *data);
+extern void		_cupsArrayFree(void *element, void *data);

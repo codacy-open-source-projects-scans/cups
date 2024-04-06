@@ -1832,6 +1832,14 @@ cupsdLoadJob(cupsd_job_t *job)		/* I - Job */
     else
       ippSetString(job->attrs, &job->reasons, 0, "none");
   }
+  else if (job->state_value == IPP_JSTATE_COMPLETED && !strcmp(ippGetString(job->reasons, 0, NULL), "processing-to-stop-point"))
+  {
+   /*
+    * Try to fix job reasons for older jobs finished before openprinting/cups #832 was applied...
+    */
+
+    ippSetString(job->attrs, &job->reasons, 0, "job-completed-successfully");
+  }
 
   job->impressions = ippFindAttribute(job->attrs, "job-impressions-completed", IPP_TAG_INTEGER);
   job->sheets      = ippFindAttribute(job->attrs, "job-media-sheets-completed", IPP_TAG_INTEGER);
@@ -2891,10 +2899,10 @@ cupsdUpdateJobs(void)
  * 'compare_active_jobs()' - Compare the job IDs and priorities of two jobs.
  */
 
-static int				/* O - Difference */
-compare_active_jobs(void *first,	/* I - First job */
-                    void *second,	/* I - Second job */
-		    void *data)		/* I - App data (not used) */
+static int                        /* O - Difference */
+compare_active_jobs(void *first,  /* I - First job */
+                    void *second, /* I - Second job */
+                    void *data)   /* I - App data (not used) */
 {
   int	diff;				/* Difference */
 
@@ -2913,10 +2921,10 @@ compare_active_jobs(void *first,	/* I - First job */
  * 'compare_completed_jobs()' - Compare the job IDs and completion times of two jobs.
  */
 
-static int				/* O - Difference */
-compare_completed_jobs(void *first,	/* I - First job */
-                       void *second,	/* I - Second job */
-		       void *data)	/* I - App data (not used) */
+static int                           /* O - Difference */
+compare_completed_jobs(void *first,  /* I - First job */
+                       void *second, /* I - Second job */
+                       void *data)   /* I - App data (not used) */
 {
   int	diff;				/* Difference */
 
@@ -2935,10 +2943,10 @@ compare_completed_jobs(void *first,	/* I - First job */
  * 'compare_jobs()' - Compare the job IDs of two jobs.
  */
 
-static int				/* O - Difference */
-compare_jobs(void *first,		/* I - First job */
-             void *second,		/* I - Second job */
-	     void *data)		/* I - App data (not used) */
+static int                 /* O - Difference */
+compare_jobs(void *first,  /* I - First job */
+             void *second, /* I - Second job */
+             void *data)   /* I - App data (not used) */
 {
   (void)data;
 
