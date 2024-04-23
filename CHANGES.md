@@ -8,6 +8,7 @@ Changes in CUPS v2.5b1 (TBA)
 - Added `cupsConcatString`, `cupsCopyString`, and `cupsFormatString` string
   APIs.
 - Added new APIs for form, JSON, JWT, IPP, and raster setup.
+- Added support for wide-area DNS-SD with Avahi (Issue #319)
 - Added `cupsCopyDestInfo2` API (Issue #586)
 - Added OpenSSL support for `cupsHashData` (Issue #762)
 - Added warning if the device has to do IPP request for 'all,media-col-database'
@@ -29,6 +30,8 @@ Changes in CUPS v2.5b1 (TBA)
   "print-quality" (Issue #734)
 - Updated `cups_enum_dests()` timeout for listing available IPP printers
   (Issue #751)
+- Updated the `ippeveprinter` program to support the `-f` option with `-a`
+  (Issue #759)
 - Updated default destination documentation (Issue #819)
 - Updated `httpAddrConnect2()` to handle `POLLHUP` together with `POLLIN` or
   `POLLOUT` (Issue #839)
@@ -37,8 +40,7 @@ Changes in CUPS v2.5b1 (TBA)
 - Updated the "get-printer-attributes-suite.test" test file (Issue #909)
 - Updated `cupsRasterReadPixels` and `cupsRasterWritePixels` to not try reading
   or writing if the number of bytes passed is 0 (Issue #914)
-- The `ippeveprinter` program now supports the `-f` option with `-a`
-  (Issue #759)
+- Updated and documented the MIME typing buffering limit (Issue #925)
 - Fixed use-after-free in `cupsdAcceptClient()` when we log warning during error
   handling (fixes CVE-2023-34241)
 - Fixed hanging of `lpstat` on Solaris (Issue #156)
@@ -61,6 +63,7 @@ Changes in CUPS v2.5b1 (TBA)
 - Fixed printing to stderr if we can't open cups-files.conf (Issue #777)
 - Fixed memory leak when unloading a job (Issue #813)
 - Fixed memory leak when creating color profiles (Issue #814)
+- Fixed punch finisher support for IPP Everywhere printers (Issue #821)
 - Fixed crash in `scan_ps()` if incoming argument is NULL (Issue #831)
 - Fixed setting job state reasons for successful jobs (Issue #832)
 - Fixed infinite loop in IPP backend if hostname is IP address with Kerberos
