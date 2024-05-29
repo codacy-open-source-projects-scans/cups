@@ -8,7 +8,6 @@
 //
 
 #include "cups-private.h"
-#include "debug-internal.h"
 #include "dnssd.h"
 
 #ifdef __APPLE__
@@ -65,6 +64,7 @@ struct _cups_dnssd_s			// DNS-SD context
 
 #else // HAVE_AVAHI
   cups_mutex_t		mutex;		// Avahi poll mutex
+  bool			in_callback;	// Doing a callback?
   AvahiClient		*client;	// Avahi client connection
   AvahiSimplePoll	*poll;		// Avahi poll class
   cups_thread_t		monitor;	// Monitoring thread
@@ -206,6 +206,182 @@ cupsDNSSDAssembleFullName(
   return (!avahi_service_name_join(fullname, fullsize, name, type, domain));
 #endif // HAVE_MDNSRESPONDER
 }
+
+
+//
+// 'cupsDNSSDBrowseDelete()' - Cancel and delete a browse request.
+//
+
+void
+cupsDNSSDBrowseDelete(
+    cups_dnssd_browse_t *browse)	// I - Browse request
+{
+  if (browse)
+  {
+    cups_dnssd_t *dnssd = browse->dnssd;
+
+    DEBUG_puts("2cupsDNSSDBrowseDelete: Write locking rwlock.");
+    cupsRWLockWrite(&dnssd->rwlock);
+
+    cupsArrayRemove(dnssd->browses, browse);
+
+    DEBUG_puts("2cupsDNSSDBrowseDelete: Unlocking rwlock.");
+    cupsRWUnlock(&dnssd->rwlock);
+  }
+}
+
+
+//
+// 'cupsDNSSDBrowseGetContext()' - Get the DNS-SD context for the browse request.
+//
+
+cups_dnssd_t *				// O - Context or `NULL`
+cupsDNSSDBrowseGetContext(
+    cups_dnssd_browse_t *browse)	// I - Browse request
+{
+  return (browse ? browse->dnssd : NULL);
+}
+
+
+//
+// 'cupsDNSSDBrowseNew()' - Create a new DNS-SD browse request.
+//
+// This function creates a new DNS-SD browse request for the specified service
+// types and optional domain and interface index.  The "types" argument can be a
+// single service type ("_ipp._tcp") or a service type and comma-delimited list
+// of sub-types ("_ipp._tcp,_print,_universal").
+//
+// Newly discovered services are reported using the required browse callback
+// function, with the "flags" argument set to `CUPS_DNSSD_FLAGS_ADD` for newly
+// discovered services, `CUPS_DNSSD_FLAGS_NONE` for removed services, or
+// `CUPS_DNSSD_FLAGS_ERROR` on an error:
+//
+// ```
+// void
+// browse_cb(
+//     cups_dnssd_browse_t *browse,
+//     void                *cb_data,
+//     cups_dnssd_flags_t  flags,
+//     uint32_t            if_index,
+//     const char          *name,
+//     const char          *regtype,
+//     const char          *domain)
+// {
+//     // Process added/removed service
+// }
+// ```
+//
+
+cups_dnssd_browse_t *			// O - Browse request or `NULL` on error
+cupsDNSSDBrowseNew(
+    cups_dnssd_t           *dnssd,	// I - DNS-SD context
+    uint32_t               if_index,	// I - Interface index, `CUPS_DNSSD_IF_INDEX_ANY`, or `CUPS_DNSSD_IF_INDEX_LOCAL`
+    const char             *types,	// I - Service types
+    const char             *domain,	// I - Domain name or `NULL` for default
+    cups_dnssd_browse_cb_t browse_cb,	// I - Browse callback function
+    void                   *cb_data)	// I - Browse callback data
+{
+  cups_dnssd_browse_t	*browse;	// Browse request
+
+
+  // Range check input...
+  if (!dnssd || !types || !browse_cb)
+    return (NULL);
+
+  // Allocate memory for the browser...
+  if ((browse = (cups_dnssd_browse_t *)calloc(1, sizeof(cups_dnssd_browse_t))) == NULL)
+    return (NULL);
+
+  browse->dnssd   = dnssd;
+  browse->cb      = browse_cb;
+  browse->cb_data = cb_data;
+
+  DEBUG_puts("2cupsDNSSDBrowseNew: Write locking rwlock.");
+  cupsRWLockWrite(&dnssd->rwlock);
+
+  if (!dnssd->browses)
+  {
+    // Create an array of browsers...
+    if ((dnssd->browses = cupsArrayNew3(NULL, NULL, NULL, 0, NULL, (cups_afree_cb_t)delete_browse)) == NULL)
+    {
+      // Unable to create...
+      free(browse);
+      browse = NULL;
+      goto done;
+    }
+  }
+
+#ifdef HAVE_MDNSRESPONDER
+  DNSServiceErrorType error;		// Error, if any
+
+  browse->ref = dnssd->ref;
+  if ((error = DNSServiceBrowse(&browse->ref, kDNSServiceFlagsShareConnection, if_index, types, domain, (DNSServiceBrowseReply)mdns_browse_cb, browse)) != kDNSServiceErr_NoError)
+  {
+    report_error(dnssd, "Unable to create DNS-SD browse request: %s", mdns_strerror(error));
+    free(browse);
+    browse = NULL;
+    goto done;
+  }
+
+#elif _WIN32
+
+#else // HAVE_AVAHI
+  if (!dnssd->in_callback)
+  {
+    DEBUG_puts("2cupsDNSSDBrowseNew: Locking mutex.");
+    cupsMutexLock(&dnssd->mutex);
+  }
+
+  browse->num_browsers = 1;
+  browse->browsers[0]  = avahi_service_browser_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, types, /*domain*/NULL, /*flags*/0, (AvahiServiceBrowserCallback)avahi_browse_cb, browse);
+
+  if (!browse->browsers[0])
+  {
+    report_error(dnssd, "Unable to create DNS-SD browse request: %s", avahi_strerror(avahi_client_errno(dnssd->client)));
+    free(browse);
+    browse = NULL;
+
+    if (!dnssd->in_callback)
+    {
+      DEBUG_puts("2cupsDNSSDBrowseNew: Unlocking mutex.");
+      cupsMutexUnlock(&dnssd->mutex);
+    }
+
+    goto done;
+  }
+
+  if (!domain && dnssd->num_domains > 0)
+  {
+    // Add browsers for all domains...
+    size_t	i;			// Looping var
+
+    for (i = 0; i < dnssd->num_domains; i ++)
+    {
+      if ((browse->browsers[browse->num_browsers] = avahi_service_browser_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, types, dnssd->domains[i], /*flags*/0, (AvahiServiceBrowserCallback)avahi_browse_cb, browse)) != NULL)
+        browse->num_browsers ++;
+    }
+  }
+
+  if (!dnssd->in_callback)
+  {
+    DEBUG_puts("2cupsDNSSDBrowseNew: Unlocking mutex.");
+    cupsMutexUnlock(&dnssd->mutex);
+
+    avahi_simple_poll_wakeup(dnssd->poll);
+  }
+#endif // HAVE_MDNSRESPONDER
+
+  DEBUG_printf("2cupsDNSSDBrowseNew: Adding browse=%p", (void *)browse);
+  cupsArrayAdd(dnssd->browses, browse);
+
+  done:
+
+  DEBUG_puts("2cupsDNSSDBrowseNew: Unlocking rwlock.");
+  cupsRWUnlock(&dnssd->rwlock);
+
+  return (browse);
+}
+
 
 
 //
@@ -377,127 +553,6 @@ cupsDNSSDDecodeTXT(
 
 
 //
-// 'cupsDNSSDSeparateFullName()' - Separate a full service name into an instance
-//                                 name, registration type, and domain.
-//
-// This function separates a full service name such as
-// "Example\032Name._ipp._tcp.local.") into its instance name ("Example Name"),
-// registration type ("_ipp._tcp"), and domain ("local.").
-//
-
-bool					// O - `true` on success, `false` on error
-cupsDNSSDSeparateFullName(
-    const char *fullname,		// I - Full service name
-    char       *name,			// I - Instance name buffer
-    size_t     namesize,		// I - Size of instance name buffer
-    char       *type,			// I - Registration type buffer
-    size_t     typesize,		// I - Size of registration type buffer
-    char       *domain,			// I - Domain name buffer
-    size_t     domainsize)		// I - Size of domain name buffer
-{
-  // Range check input..
-  if (!fullname || !name || !namesize || !type || !typesize || !domain || !domainsize)
-  {
-    if (name)
-      *name = '\0';
-    if (type)
-      *type = '\0';
-    if (domain)
-      *domain = '\0';
-
-    return (false);
-  }
-
-#if _WIN32 || defined(HAVE_MDNSRESPONDER)
-  bool	ret = true;			// Return value
-  char	*ptr,				// Pointer into name/type/domain
-	*end;				// Pointer to end of name/type/domain
-
-  // Get the service name...
-  for (ptr = name, end = name + namesize - 1; *fullname; fullname ++)
-  {
-    if (*fullname == '.')
-    {
-      // Service type separator...
-      break;
-    }
-    else if (*fullname == '\\' && isdigit(fullname[1] & 255) && isdigit(fullname[2] & 255) && isdigit(fullname[3] & 255))
-    {
-      // Escaped character
-      if (ptr < end)
-        *ptr++ = (fullname[1] - '0') * 100 + (fullname[2] - '0') * 10 + fullname[3] - '0';
-      else
-        ret = false;
-
-      fullname += 3;
-    }
-    else if (ptr < end)
-      *ptr++ = *fullname;
-    else
-      ret = false;
-  }
-  *ptr = '\0';
-
-  if (*fullname)
-    fullname ++;
-
-  // Get the type...
-  for (ptr = type, end = type + typesize - 1; *fullname; fullname ++)
-  {
-    if (*fullname == '.' && fullname[1] != '_')
-    {
-      // Service type separator...
-      break;
-    }
-    else if (*fullname == '\\' && isdigit(fullname[1] & 255) && isdigit(fullname[2] & 255) && isdigit(fullname[3] & 255))
-    {
-      // Escaped character
-      if (ptr < end)
-        *ptr++ = (fullname[1] - '0') * 100 + (fullname[2] - '0') * 10 + fullname[3] - '0';
-      else
-        ret = false;
-
-      fullname += 3;
-    }
-    else if (ptr < end)
-      *ptr++ = *fullname;
-    else
-      ret = false;
-  }
-  *ptr = '\0';
-
-  if (*fullname)
-    fullname ++;
-
-  // Get the domain...
-  for (ptr = domain, end = domain + domainsize - 1; *fullname; fullname ++)
-  {
-    if (*fullname == '\\' && isdigit(fullname[1] & 255) && isdigit(fullname[2] & 255) && isdigit(fullname[3] & 255))
-    {
-      // Escaped character
-      if (ptr < end)
-        *ptr++ = (fullname[1] - '0') * 100 + (fullname[2] - '0') * 10 + fullname[3] - '0';
-      else
-        ret = false;
-
-      fullname += 3;
-    }
-    else if (ptr < end)
-      *ptr++ = *fullname;
-    else
-      ret = false;
-  }
-  *ptr = '\0';
-
-  return (ret);
-
-#else // HAVE_AVAHI
-  return (!avahi_service_name_split(fullname, name, namesize, type, typesize, domain, domainsize));
-#endif // _WIN32 || HAVE_MDNSRESPONDER
-}
-
-
-//
 // 'cupsDNSSDDelete()' - Delete a DNS-SD context and all its requests.
 //
 
@@ -555,7 +610,17 @@ size_t					// O - Number of host name changes
 cupsDNSSDGetConfigChanges(
     cups_dnssd_t *dnssd)		// I - DNS-SD context
 {
-  return (dnssd ? dnssd->config_changes : 0);
+  size_t	config_changes = 0;
+
+
+  if (dnssd)
+  {
+    cupsRWLockRead(&dnssd->rwlock);
+    config_changes = dnssd->config_changes;
+    cupsRWUnlock(&dnssd->rwlock);
+  }
+
+  return (config_changes);
 }
 
 
@@ -679,163 +744,6 @@ cupsDNSSDNew(
 
 
 //
-// 'cupsDNSSDBrowseDelete()' - Cancel and delete a browse request.
-//
-
-void
-cupsDNSSDBrowseDelete(
-    cups_dnssd_browse_t *browse)	// I - Browse request
-{
-  if (browse)
-  {
-    cups_dnssd_t *dnssd = browse->dnssd;
-
-    DEBUG_puts("2cupsDNSSDBrowseDelete: Write locking rwlock.");
-    cupsRWLockWrite(&dnssd->rwlock);
-
-    cupsArrayRemove(dnssd->browses, browse);
-
-    DEBUG_puts("2cupsDNSSDBrowseDelete: Unlocking rwlock.");
-    cupsRWUnlock(&dnssd->rwlock);
-  }
-}
-
-
-//
-// 'cupsDNSSDBrowseGetContext()' - Get the DNS-SD context for the browse request.
-//
-
-cups_dnssd_t *				// O - Context or `NULL`
-cupsDNSSDBrowseGetContext(
-    cups_dnssd_browse_t *browse)	// I - Browse request
-{
-  return (browse ? browse->dnssd : NULL);
-}
-
-
-//
-// 'cupsDNSSDBrowseNew()' - Create a new DNS-SD browse request.
-//
-// This function creates a new DNS-SD browse request for the specified service
-// types and optional domain and interface index.  The "types" argument can be a
-// single service type ("_ipp._tcp") or a service type and comma-delimited list
-// of sub-types ("_ipp._tcp,_print,_universal").
-//
-// Newly discovered services are reported using the required browse callback
-// function, with the "flags" argument set to `CUPS_DNSSD_FLAGS_ADD` for newly
-// discovered services, `CUPS_DNSSD_FLAGS_NONE` for removed services, or
-// `CUPS_DNSSD_FLAGS_ERROR` on an error:
-//
-// ```
-// void
-// browse_cb(
-//     cups_dnssd_browse_t *browse,
-//     void                *cb_data,
-//     cups_dnssd_flags_t  flags,
-//     uint32_t            if_index,
-//     const char          *name,
-//     const char          *regtype,
-//     const char          *domain)
-// {
-//     // Process added/removed service
-// }
-// ```
-//
-
-cups_dnssd_browse_t *			// O - Browse request or `NULL` on error
-cupsDNSSDBrowseNew(
-    cups_dnssd_t           *dnssd,	// I - DNS-SD context
-    uint32_t               if_index,	// I - Interface index, `CUPS_DNSSD_IF_INDEX_ANY`, or `CUPS_DNSSD_IF_INDEX_LOCAL`
-    const char             *types,	// I - Service types
-    const char             *domain,	// I - Domain name or `NULL` for default
-    cups_dnssd_browse_cb_t browse_cb,	// I - Browse callback function
-    void                   *cb_data)	// I - Browse callback data
-{
-  cups_dnssd_browse_t	*browse;	// Browse request
-
-
-  // Range check input...
-  if (!dnssd || !types || !browse_cb)
-    return (NULL);
-
-  // Allocate memory for the browser...
-  if ((browse = (cups_dnssd_browse_t *)calloc(1, sizeof(cups_dnssd_browse_t))) == NULL)
-    return (NULL);
-
-  browse->dnssd   = dnssd;
-  browse->cb      = browse_cb;
-  browse->cb_data = cb_data;
-
-  DEBUG_puts("2cupsDNSSDBrowseNew: Write locking rwlock.");
-  cupsRWLockWrite(&dnssd->rwlock);
-
-  if (!dnssd->browses)
-  {
-    // Create an array of browsers...
-    if ((dnssd->browses = cupsArrayNew3(NULL, NULL, NULL, 0, NULL, (cups_afree_func_t)delete_browse)) == NULL)
-    {
-      // Unable to create...
-      free(browse);
-      browse = NULL;
-      goto done;
-    }
-  }
-
-#ifdef HAVE_MDNSRESPONDER
-  DNSServiceErrorType error;		// Error, if any
-
-  browse->ref = dnssd->ref;
-  if ((error = DNSServiceBrowse(&browse->ref, kDNSServiceFlagsShareConnection, if_index, types, domain, (DNSServiceBrowseReply)mdns_browse_cb, browse)) != kDNSServiceErr_NoError)
-  {
-    report_error(dnssd, "Unable to create DNS-SD browse request: %s", mdns_strerror(error));
-    free(browse);
-    browse = NULL;
-    goto done;
-  }
-
-#elif _WIN32
-
-#else // HAVE_AVAHI
-  browse->num_browsers = 1;
-  browse->browsers[0]  = avahi_service_browser_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, types, /*domain*/NULL, /*flags*/0, (AvahiServiceBrowserCallback)avahi_browse_cb, browse);
-
-  if (!browse->browsers[0])
-  {
-    report_error(dnssd, "Unable to create DNS-SD browse request: %s", avahi_strerror(avahi_client_errno(dnssd->client)));
-    free(browse);
-    browse = NULL;
-    goto done;
-  }
-
-  if (!domain && dnssd->num_domains > 0)
-  {
-    // Add browsers for all domains...
-    size_t	i;			// Looping var
-
-    for (i = 0; i < dnssd->num_domains; i ++)
-    {
-      if ((browse->browsers[browse->num_browsers] = avahi_service_browser_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, types, dnssd->domains[i], /*flags*/0, (AvahiServiceBrowserCallback)avahi_browse_cb, browse)) != NULL)
-        browse->num_browsers ++;
-    }
-  }
-
-  avahi_simple_poll_wakeup(dnssd->poll);
-#endif // HAVE_MDNSRESPONDER
-
-  DEBUG_printf("2cupsDNSSDBrowseNew: Adding browse=%p", (void *)browse);
-  cupsArrayAdd(dnssd->browses, browse);
-
-  done:
-
-  DEBUG_puts("2cupsDNSSDBrowseNew: Unlocking rwlock.");
-  cupsRWUnlock(&dnssd->rwlock);
-
-  return (browse);
-}
-
-
-
-//
 // 'cupsDNSSDQueryDelete()' - Cancel and delete a query request.
 //
 
@@ -909,6 +817,8 @@ cupsDNSSDQueryNew(
   cups_dnssd_query_t	*query;		// Query request
 
 
+  DEBUG_printf("cupsDNSSDQueryNew(dnssd=%p, if_index=%u, fullname=\"%s\", rrtype=%u, query_cb=%p, cb_data=%p)", (void *)dnssd, if_index, fullname, rrtype, (void *)query_cb, cb_data);
+
   // Range check input...
   if (!dnssd || !fullname || !query_cb)
     return (NULL);
@@ -927,7 +837,8 @@ cupsDNSSDQueryNew(
   if (!dnssd->queries)
   {
     // Create an array of resolvers...
-    if ((dnssd->queries = cupsArrayNew3(NULL, NULL, NULL, 0, NULL, (cups_afree_func_t)delete_query)) == NULL)
+    DEBUG_puts("2cupsDNSSDQueryNew: Creating queries array.");
+    if ((dnssd->queries = cupsArrayNew3(NULL, NULL, NULL, 0, NULL, (cups_afree_cb_t)delete_query)) == NULL)
     {
       // Unable to create...
       free(query);
@@ -951,8 +862,21 @@ cupsDNSSDQueryNew(
 #elif _WIN32
 
 #else // HAVE_AVAHI
+  if (!dnssd->in_callback)
+  {
+    DEBUG_puts("4avahi_poll_cb: Locking mutex.");
+    cupsMutexLock(&dnssd->mutex);
+  }
+
   query->browser = avahi_record_browser_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, fullname, AVAHI_DNS_CLASS_IN, rrtype, 0, (AvahiRecordBrowserCallback)avahi_query_cb, query);
-  avahi_simple_poll_wakeup(dnssd->poll);
+
+  if (!dnssd->in_callback)
+  {
+    DEBUG_puts("4avahi_poll_cb: Unlocking mutex.");
+    cupsMutexUnlock(&dnssd->mutex);
+
+    avahi_simple_poll_wakeup(dnssd->poll);
+  }
 
   if (!query->browser)
   {
@@ -1030,7 +954,7 @@ cupsDNSSDResolveGetContext(
 //     const char           *fullname,
 //     const char           *host,
 //     uint16_t             port,
-//     int                  num_txt,
+//     size_t               num_txt,
 //     cups_option_t        *txt)
 // {
 //     // Process resolved service
@@ -1071,23 +995,6 @@ cupsDNSSDResolveNew(
   resolve->cb      = resolve_cb;
   resolve->cb_data = cb_data;
 
-  DEBUG_puts("2cupsDNSSDResolveNew: Write locking rwlock.");
-  cupsRWLockWrite(&dnssd->rwlock);
-
-  if (!dnssd->resolves)
-  {
-    // Create an array of resolvers...
-    DEBUG_puts("2cupsDNSSDResolveNew: Creating resolver array.");
-    if ((dnssd->resolves = cupsArrayNew3(NULL, NULL, NULL, 0, NULL, (cups_afree_func_t)delete_resolve)) == NULL)
-    {
-      // Unable to create...
-      DEBUG_printf("2cupsDNSSDResolveNew: Unable to allocate memory: %s", strerror(errno));
-      free(resolve);
-      resolve = NULL;
-      goto done;
-    }
-  }
-
 #ifdef HAVE_MDNSRESPONDER
   DNSServiceErrorType error;		// Error, if any
 
@@ -1096,24 +1003,53 @@ cupsDNSSDResolveNew(
   {
     report_error(dnssd, "Unable to create DNS-SD query request: %s", mdns_strerror(error));
     free(resolve);
-    resolve = NULL;
-    goto done;
+    return (NULL);
   }
 
 #elif _WIN32
 
 #else // HAVE_AVAHI
+  if (!dnssd->in_callback)
+  {
+    DEBUG_puts("2cupsDNSSDResolveNew: Locking mutex.");
+    cupsMutexLock(&dnssd->mutex);
+  }
+
   resolve->resolver = avahi_service_resolver_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, name, type, domain, AVAHI_PROTO_UNSPEC, /*flags*/0, (AvahiServiceResolverCallback)avahi_resolve_cb, resolve);
-  avahi_simple_poll_wakeup(dnssd->poll);
+
+  if (!dnssd->in_callback)
+  {
+    DEBUG_puts("2cupsDNSSDResolveNew: Unlocking mutex.");
+    cupsMutexUnlock(&dnssd->mutex);
+
+    avahi_simple_poll_wakeup(dnssd->poll);
+  }
 
   if (!resolve->resolver)
   {
     report_error(dnssd, "Unable to create DNS-SD resolve request: %s", avahi_strerror(avahi_client_errno(dnssd->client)));
     free(resolve);
-    resolve = NULL;
-    goto done;
+    return (NULL);
   }
 #endif // HAVE_MDNSRESPONDER
+
+  DEBUG_puts("2cupsDNSSDResolveNew: Write locking rwlock.");
+  cupsRWLockWrite(&dnssd->rwlock);
+
+  if (!dnssd->resolves)
+  {
+    // Create an array of resolvers...
+    DEBUG_puts("2cupsDNSSDResolveNew: Creating resolver array.");
+    if ((dnssd->resolves = cupsArrayNew3(NULL, NULL, NULL, 0, NULL, (cups_afree_cb_t)delete_resolve)) == NULL)
+    {
+      // Unable to create...
+      DEBUG_printf("2cupsDNSSDResolveNew: Unable to allocate memory: %s", strerror(errno));
+      free(resolve);
+      resolve = NULL;
+
+      goto done;
+    }
+  }
 
   DEBUG_printf("2cupsDNSSDResolveNew: Adding resolver %p.", (void *)resolve);
   cupsArrayAdd(dnssd->resolves, resolve);
@@ -1124,6 +1060,127 @@ cupsDNSSDResolveNew(
   cupsRWUnlock(&dnssd->rwlock);
 
   return (resolve);
+}
+
+
+//
+// 'cupsDNSSDSeparateFullName()' - Separate a full service name into an instance
+//                                 name, registration type, and domain.
+//
+// This function separates a full service name such as
+// "Example\032Name._ipp._tcp.local.") into its instance name ("Example Name"),
+// registration type ("_ipp._tcp"), and domain ("local.").
+//
+
+bool					// O - `true` on success, `false` on error
+cupsDNSSDSeparateFullName(
+    const char *fullname,		// I - Full service name
+    char       *name,			// I - Instance name buffer
+    size_t     namesize,		// I - Size of instance name buffer
+    char       *type,			// I - Registration type buffer
+    size_t     typesize,		// I - Size of registration type buffer
+    char       *domain,			// I - Domain name buffer
+    size_t     domainsize)		// I - Size of domain name buffer
+{
+  // Range check input..
+  if (!fullname || !name || !namesize || !type || !typesize || !domain || !domainsize)
+  {
+    if (name)
+      *name = '\0';
+    if (type)
+      *type = '\0';
+    if (domain)
+      *domain = '\0';
+
+    return (false);
+  }
+
+#if _WIN32 || defined(HAVE_MDNSRESPONDER)
+  bool	ret = true;			// Return value
+  char	*ptr,				// Pointer into name/type/domain
+	*end;				// Pointer to end of name/type/domain
+
+  // Get the service name...
+  for (ptr = name, end = name + namesize - 1; *fullname; fullname ++)
+  {
+    if (*fullname == '.')
+    {
+      // Service type separator...
+      break;
+    }
+    else if (*fullname == '\\' && isdigit(fullname[1] & 255) && isdigit(fullname[2] & 255) && isdigit(fullname[3] & 255))
+    {
+      // Escaped character
+      if (ptr < end)
+        *ptr++ = (fullname[1] - '0') * 100 + (fullname[2] - '0') * 10 + fullname[3] - '0';
+      else
+        ret = false;
+
+      fullname += 3;
+    }
+    else if (ptr < end)
+      *ptr++ = *fullname;
+    else
+      ret = false;
+  }
+  *ptr = '\0';
+
+  if (*fullname)
+    fullname ++;
+
+  // Get the type...
+  for (ptr = type, end = type + typesize - 1; *fullname; fullname ++)
+  {
+    if (*fullname == '.' && fullname[1] != '_')
+    {
+      // Service type separator...
+      break;
+    }
+    else if (*fullname == '\\' && isdigit(fullname[1] & 255) && isdigit(fullname[2] & 255) && isdigit(fullname[3] & 255))
+    {
+      // Escaped character
+      if (ptr < end)
+        *ptr++ = (fullname[1] - '0') * 100 + (fullname[2] - '0') * 10 + fullname[3] - '0';
+      else
+        ret = false;
+
+      fullname += 3;
+    }
+    else if (ptr < end)
+      *ptr++ = *fullname;
+    else
+      ret = false;
+  }
+  *ptr = '\0';
+
+  if (*fullname)
+    fullname ++;
+
+  // Get the domain...
+  for (ptr = domain, end = domain + domainsize - 1; *fullname; fullname ++)
+  {
+    if (*fullname == '\\' && isdigit(fullname[1] & 255) && isdigit(fullname[2] & 255) && isdigit(fullname[3] & 255))
+    {
+      // Escaped character
+      if (ptr < end)
+        *ptr++ = (fullname[1] - '0') * 100 + (fullname[2] - '0') * 10 + fullname[3] - '0';
+      else
+        ret = false;
+
+      fullname += 3;
+    }
+    else if (ptr < end)
+      *ptr++ = *fullname;
+    else
+      ret = false;
+  }
+  *ptr = '\0';
+
+  return (ret);
+
+#else // HAVE_AVAHI
+  return (!avahi_service_name_split(fullname, name, namesize, type, typesize, domain, domainsize));
+#endif // _WIN32 || HAVE_MDNSRESPONDER
 }
 
 
@@ -1392,7 +1449,7 @@ cupsDNSSDServiceNew(
   if (!dnssd->services)
   {
     // Create an array of services...
-    if ((dnssd->services = cupsArrayNew3(NULL, NULL, NULL, 0, NULL, (cups_afree_func_t)delete_service)) == NULL)
+    if ((dnssd->services = cupsArrayNew3(NULL, NULL, NULL, 0, NULL, (cups_afree_cb_t)delete_service)) == NULL)
     {
       // Unable to create...
       free(service->name);
@@ -2108,7 +2165,9 @@ avahi_browse_cb(
         return;
   }
 
+  browse->dnssd->in_callback = true;
   (browse->cb)(browse, browse->cb_data, cups_flags, (uint32_t)if_index, name, type, domain);
+  browse->dnssd->in_callback = false;
 }
 
 
@@ -2273,14 +2332,14 @@ avahi_poll_cb(struct pollfd *ufds,	// I - File descriptors for poll
 
   DEBUG_printf("3avahi_poll_cb(ufds=%p, nfds=%u, timeout=%d, dnssd=%p)", (void *)ufds, nfds, timeout, (void *)dnssd);
 
-  DEBUG_puts("4avahi_poll_cb: Locking mutex.");
+  DEBUG_puts("4avahi_poll_cb: Unlocking mutex.");
   cupsMutexUnlock(&dnssd->mutex);
 
   DEBUG_puts("4avahi_poll_cb: Polling sockets...");
   ret = poll(ufds, nfds, timeout);
   DEBUG_printf("4avahi_poll_cb: poll() returned %d...", ret);
 
-  DEBUG_puts("4avahi_poll_cb: Unlocking mutex.");
+  DEBUG_puts("4avahi_poll_cb: Locking mutex.");
   cupsMutexLock(&dnssd->mutex);
 
   return (ret);
@@ -2311,7 +2370,9 @@ avahi_query_cb(
 
   DEBUG_printf("3avahi_query_cb(..., event=%s, fullname=\"%s\", ..., query=%p)", avahi_events[event], fullname, query);
 
-  (query->cb)(query, query->cb_data, event == AVAHI_BROWSER_NEW ? CUPS_DNSSD_FLAGS_NONE : CUPS_DNSSD_FLAGS_ERROR, (uint32_t)if_index, fullname, rrtype, rdata, rdlen);
+  query->dnssd->in_callback = true;
+  (query->cb)(query, query->cb_data, event == AVAHI_BROWSER_FAILURE ? CUPS_DNSSD_FLAGS_ERROR : event == AVAHI_BROWSER_NEW ? CUPS_DNSSD_FLAGS_ADD : CUPS_DNSSD_FLAGS_NONE, (uint32_t)if_index, fullname, rrtype, rdata, rdlen);
+  query->dnssd->in_callback = false;
 }
 
 
@@ -2336,7 +2397,7 @@ avahi_resolve_cb(
     cups_dnssd_resolve_t   *resolve)	// I - Resolve request
 {
   AvahiStringList *txtpair;		// Current pair
-  int		num_txt = 0;		// Number of TXT key/value pairs
+  size_t	num_txt = 0;		// Number of TXT key/value pairs
   cups_option_t	*txt = NULL;		// TXT key/value pairs
   char		fullname[1024];		// Full service name
 
@@ -2371,7 +2432,7 @@ avahi_resolve_cb(
   DEBUG_printf("4avahi_resolve_cb: fullname=\"%s\"", fullname);
 
   // Do the resolve callback and free the TXT record stuff...
-  (resolve->cb)(resolve, resolve->cb_data, event == AVAHI_RESOLVER_FOUND ? CUPS_DNSSD_FLAGS_NONE : CUPS_DNSSD_FLAGS_ERROR, (uint32_t)if_index, fullname, host, port, num_txt, txt);
+  (resolve->cb)(resolve, resolve->cb_data, event == AVAHI_RESOLVER_FAILURE ? CUPS_DNSSD_FLAGS_ERROR : CUPS_DNSSD_FLAGS_NONE, (uint32_t)if_index, fullname, host, port, num_txt, txt);
 
   cupsFreeOptions(num_txt, txt);
 }

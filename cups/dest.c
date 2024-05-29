@@ -2681,6 +2681,8 @@ cups_dest_query_cb(
   (void)if_index;
   (void)rrtype;
 
+  DEBUG_printf("5cups_dest_query_cb(query=%p, context=%p, flags=0x%x, if_index=%u, fullname=\"%s\", rrtype=%u, rdata=%p, rdlen=%u)", (void *)query, context, (unsigned)flags, (unsigned)if_index, fullname, rrtype, rdata, rdlen);
+
   // Only process "add" data...
   if (!(flags & CUPS_DNSSD_FLAGS_ADD) || (flags & CUPS_DNSSD_FLAGS_ERROR))
     return;
@@ -2695,7 +2697,11 @@ cups_dest_query_cb(
 
   dkey.dest.name = name;
 
-  if ((device = cupsArrayFind(data->devices, &dkey)) != NULL && device->state == _CUPS_DNSSD_NEW)
+  cupsRWLockRead(&data->rwlock);
+  device = cupsArrayFind(data->devices, &dkey);
+  cupsRWUnlock(&data->rwlock);
+
+  if (device && device->state == _CUPS_DNSSD_NEW)
   {
     // Found it, pull out the make and model from the TXT record and save it...
     const uint8_t	*txt,		// Pointer into data
