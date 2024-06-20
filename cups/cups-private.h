@@ -69,11 +69,10 @@ typedef struct _cups_globals_s		// CUPS global state data
   // Multiple places...
   const char		*cups_datadir,	// CUPS_DATADIR environment var
 			*cups_serverbin,// CUPS_SERVERBIN environment var
-			*cups_serverroot,
-					// CUPS_SERVERROOT environment var
-			*cups_statedir,	// CUPS_STATEDIR environment var
-			*home,		// HOME environment var
-			*localedir;	// LOCALDIR environment var
+			*sysconfig,	// System configuration directory (influenced by CUPS_SERVERROOT environment var)
+			*cups_statedir;	// CUPS_STATEDIR environment var
+  char			*userconfig;	// User configuration directory (influenced by various environment vars)
+  const char		*localedir;	// LOCALDIR environment var
 
   // adminutil.c
   time_t		cupsd_update;	// Last time we got or set cupsd.conf
@@ -190,7 +189,6 @@ typedef struct _cups_globals_s		// CUPS global state data
   char			pw_buf[PW_BUF_SIZE];
 					// Big buffer for struct passwd buffers
 #  endif // !_WIN32
-  const char		*userconfig;	// User-specific config files
 } _cups_globals_t;
 
 typedef struct _cups_media_db_s		// Media database
@@ -255,7 +253,7 @@ extern void		_cupsBufferRelease(char *b) _CUPS_PRIVATE;
 
 extern http_t		*_cupsConnect(void) _CUPS_PRIVATE;
 extern char		*_cupsCreateDest(const char *name, const char *info, const char *device_id, const char *device_uri, char *uri, size_t urisize) _CUPS_PRIVATE;
-extern ipp_attribute_t	*_cupsEncodeOption(ipp_t *ipp, ipp_tag_t group_tag, _ipp_option_t *map, const char *name, const char *value) _CUPS_PRIVATE;
+extern bool		_cupsDirCreate(const char *path, mode_t mode) _CUPS_PRIVATE;extern ipp_attribute_t	*_cupsEncodeOption(ipp_t *ipp, ipp_tag_t group_tag, _ipp_option_t *map, const char *name, const char *value) _CUPS_PRIVATE;
 extern int		_cupsGet1284Values(const char *device_id, cups_option_t **values) _CUPS_PRIVATE;
 extern const char	*_cupsGetDestResource(cups_dest_t *dest, unsigned flags, char *resource, size_t resourcesize) _CUPS_PRIVATE;
 extern int		_cupsGetDests(http_t *http, ipp_op_t op, const char *name, cups_dest_t **dests, cups_ptype_t type, cups_ptype_t mask) _CUPS_PRIVATE;
