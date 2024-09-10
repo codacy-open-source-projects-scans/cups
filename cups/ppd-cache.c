@@ -1498,7 +1498,7 @@ _ppdCacheCreateWithPPD(
       * Add localized text for PWG keyword to message catalog...
       */
 
-      snprintf(msg_id, sizeof(msg_id), "output-bin.%s", pwg_name);
+      snprintf(msg_id, sizeof(msg_id), "output-bin.%s", pwg_keyword);
       ppd_get_strings(ppd, langs, "OutputBin", choice, msg_id);
     }
   }
@@ -3183,11 +3183,12 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
   ipp_t			*media_col,	/* Media collection */
 			*media_size;	/* Media size collection */
   char			make[256],	/* Make and model */
-			*model,		/* Model name */
+			*mptr,		/* Pointer into make and model */
 			ppdname[PPD_MAX_NAME],
 		    			/* PPD keyword */
 		    	ppdtext[PPD_MAX_TEXT];
 					/* PPD English text */
+  const char		*model;		/* Model name */
   int			i, j,		/* Looping vars */
 			count,		/* Number of values */
 			bottom,		/* Largest bottom margin */
@@ -3252,6 +3253,92 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
   }
 
  /*
+  * Get a sanitized make and model...
+  */
+
+  if ((attr = ippFindAttribute(supported, "printer-make-and-model", IPP_TAG_TEXT)) != NULL && ippValidateAttribute(attr))
+  {
+   /*
+    * Sanitize the model name to only contain PPD-safe characters.
+    */
+
+    cupsCopyString(make, ippGetString(attr, 0, NULL), sizeof(make));
+
+    for (mptr = make; *mptr; mptr ++)
+    {
+      if (*mptr < ' ' || *mptr >= 127 || *mptr == '\"')
+      {
+       /*
+	* Truncate the make and model on the first bad character...
+	*/
+
+	*mptr = '\0';
+	break;
+      }
+    }
+
+    while (mptr > make)
+    {
+     /*
+      * Strip trailing whitespace...
+      */
+
+      mptr --;
+      if (*mptr == ' ')
+	*mptr = '\0';
+    }
+
+    if (!make[0])
+    {
+     /*
+      * Use a default make and model if nothing remains...
+      */
+
+      cupsCopyString(make, "Unknown", sizeof(make));
+    }
+  }
+  else
+  {
+   /*
+    * Use a default make and model...
+    */
+
+    cupsCopyString(make, "Unknown", sizeof(make));
+  }
+
+  if (!_cups_strncasecmp(make, "Hewlett Packard ", 16) || !_cups_strncasecmp(make, "Hewlett-Packard ", 16))
+  {
+   /*
+    * Normalize HP printer make and model...
+    */
+
+    model = make + 16;
+    cupsCopyString(make, "HP", sizeof(make));
+
+    if (!_cups_strncasecmp(model, "HP ", 3))
+      model += 3;
+  }
+  else if ((mptr = strchr(make, ' ')) != NULL)
+  {
+   /*
+    * Separate "MAKE MODEL"...
+    */
+
+    while (*mptr && *mptr == ' ')
+      *mptr++ = '\0';
+
+    model = mptr;
+  }
+  else
+  {
+   /*
+    * No separate model name...
+    */
+
+    model = "Printer";
+  }
+
+ /*
   * Standard stuff for PPD file...
   */
 
@@ -3264,22 +3351,6 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
   cupsFilePuts(fp, "*LanguageLevel: \"3\"\n");
   cupsFilePuts(fp, "*FileSystem: False\n");
   cupsFilePuts(fp, "*PCFileName: \"ippeve.ppd\"\n");
-
-  if ((attr = ippFindAttribute(supported, "printer-make-and-model", IPP_TAG_TEXT)) != NULL)
-    cupsCopyString(make, ippGetString(attr, 0, NULL), sizeof(make));
-  else
-    cupsCopyString(make, "Unknown Printer", sizeof(make));
-
-  if (!_cups_strncasecmp(make, "Hewlett Packard ", 16) || !_cups_strncasecmp(make, "Hewlett-Packard ", 16))
-  {
-    model = make + 16;
-    cupsCopyString(make, "HP", sizeof(make));
-  }
-  else if ((model = strchr(make, ' ')) != NULL)
-    *model++ = '\0';
-  else
-    model = make;
-
   cupsFilePrintf(fp, "*Manufacturer: \"%s\"\n", make);
   cupsFilePrintf(fp, "*ModelName: \"%s\"\n", model);
   cupsFilePrintf(fp, "*Product: \"(%s)\"\n", model);
@@ -3340,10 +3411,10 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
 
   base_lang = cupsLangGet("en");
 
-  if ((attr = ippFindAttribute(supported, "printer-more-info", IPP_TAG_URI)) != NULL)
+  if ((attr = ippFindAttribute(supported, "printer-more-info", IPP_TAG_URI)) != NULL && ippValidateAttribute(attr))
     cupsFilePrintf(fp, "*APSupplies: \"%s\"\n", ippGetString(attr, 0, NULL));
 
-  if ((attr = ippFindAttribute(supported, "printer-charge-info-uri", IPP_TAG_URI)) != NULL)
+  if ((attr = ippFindAttribute(supported, "printer-charge-info-uri", IPP_TAG_URI)) != NULL && ippValidateAttribute(attr))
     cupsFilePrintf(fp, "*cupsChargeInfoURI: \"%s\"\n", ippGetString(attr, 0, NULL));
 
  /*
@@ -3356,10 +3427,10 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
   if (ippGetBoolean(ippFindAttribute(supported, "job-accounting-user-id-supported", IPP_TAG_BOOLEAN), 0))
     cupsFilePuts(fp, "*cupsJobAccountingUserId: True\n");
 
-  if ((attr = ippFindAttribute(supported, "printer-privacy-policy-uri", IPP_TAG_URI)) != NULL)
+  if ((attr = ippFindAttribute(supported, "printer-privacy-policy-uri", IPP_TAG_URI)) != NULL && ippValidateAttribute(attr))
     cupsFilePrintf(fp, "*cupsPrivacyURI: \"%s\"\n", ippGetString(attr, 0, NULL));
 
-  if ((attr = ippFindAttribute(supported, "printer-mandatory-job-attributes", IPP_TAG_KEYWORD)) != NULL)
+  if ((attr = ippFindAttribute(supported, "printer-mandatory-job-attributes", IPP_TAG_KEYWORD)) != NULL && ippValidateAttribute(attr))
   {
     for (i = 0, count = ippGetCount(attr), prefix = "*cupsMandatory: \""; i < count; i ++)
     {
@@ -3376,7 +3447,7 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
       cupsFilePuts(fp, "\"\n");
   }
 
-  if ((attr = ippFindAttribute(supported, "printer-requested-job-attributes", IPP_TAG_KEYWORD)) != NULL)
+  if ((attr = ippFindAttribute(supported, "printer-requested-job-attributes", IPP_TAG_KEYWORD)) != NULL && ippValidateAttribute(attr))
   {
     for (i = 0, count = ippGetCount(attr), prefix = "*cupsRequested: \""; i < count; i ++)
     {
@@ -4828,9 +4899,11 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
 
       cupsArrayAdd(templates, (void *)keyword);
 
+      pwg_ppdize_name(keyword, ppdname, sizeof(ppdname));
+
       snprintf(msgid, sizeof(msgid), "finishing-template.%s", keyword);
 
-      cupsFilePrintf(fp, "*cupsFinishingTemplate %s/%s: \"\n", keyword, ppd_get_string(base_lang, lang, msgid, ppdtext, sizeof(ppdtext)));
+      cupsFilePrintf(fp, "*cupsFinishingTemplate %s/%s: \"\n", ppdname, ppd_get_string(base_lang, lang, msgid, ppdtext, sizeof(ppdtext)));
       for (finishing_attr = ippFirstAttribute(finishing_col); finishing_attr; finishing_attr = ippNextAttribute(finishing_col))
       {
         if (ippGetValueTag(finishing_attr) == IPP_TAG_BEGIN_COLLECTION)
@@ -4843,7 +4916,7 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
 	}
       }
       cupsFilePuts(fp, "\"\n");
-      ppd_put_strings(fp, langs, "cupsFinishingTemplate", keyword, msgid);
+      ppd_put_strings(fp, langs, "cupsFinishingTemplate", ppdname, msgid);
       cupsFilePuts(fp, "*End\n");
     }
 
@@ -4883,12 +4956,14 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
 					/* Preset name */
       ipp_attribute_t *member;		/* Member attribute in preset */
       const char *member_name;		/* Member attribute name */
-      char      	member_value[256];	/* Member attribute value */
+      char      member_value[256];	/* Member attribute value */
 
       if (!preset || !preset_name)
         continue;
 
-      cupsFilePrintf(fp, "*APPrinterPreset %s: \"\n", preset_name);
+      pwg_ppdize_name(preset_name, ppdname, sizeof(ppdname));
+
+      cupsFilePrintf(fp, "*APPrinterPreset %s: \"\n", ppdname);
       for (member = ippFirstAttribute(preset); member; member = ippNextAttribute(preset))
       {
         member_name = ippGetName(member);
@@ -4929,7 +5004,10 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
             fin_col = ippGetCollection(member, i);
 
             if ((keyword = ippGetString(ippFindAttribute(fin_col, "finishing-template", IPP_TAG_ZERO), 0, NULL)) != NULL)
-              cupsFilePrintf(fp, "*cupsFinishingTemplate %s\n", keyword);
+            {
+	      pwg_ppdize_name(keyword, ppdname, sizeof(ppdname));
+              cupsFilePrintf(fp, "*cupsFinishingTemplate %s\n", ppdname);
+            }
           }
         }
         else if (!strcmp(member_name, "media"))
@@ -4956,13 +5034,13 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
           if ((keyword = ippGetString(ippFindAttribute(media_col, "media-source", IPP_TAG_ZERO), 0, NULL)) != NULL)
           {
             pwg_ppdize_name(keyword, ppdname, sizeof(ppdname));
-            cupsFilePrintf(fp, "*InputSlot %s\n", keyword);
+            cupsFilePrintf(fp, "*InputSlot %s\n", ppdname);
 	  }
 
           if ((keyword = ippGetString(ippFindAttribute(media_col, "media-type", IPP_TAG_ZERO), 0, NULL)) != NULL)
           {
             pwg_ppdize_name(keyword, ppdname, sizeof(ppdname));
-            cupsFilePrintf(fp, "*MediaType %s\n", keyword);
+            cupsFilePrintf(fp, "*MediaType %s\n", ppdname);
 	  }
         }
         else if (!strcmp(member_name, "print-quality"))
@@ -5007,8 +5085,9 @@ _ppdCreateFromIPP(char   *buffer,	/* I - Filename buffer */
 
       cupsFilePuts(fp, "\"\n*End\n");
 
-//      if ((localized_name = _cupsMessageLookup(strings, preset_name)) != preset_name)
-//        cupsFilePrintf(fp, "*%s.APPrinterPreset %s/%s: \"\"\n", lang->language, preset_name, localized_name);
+      pwg_ppdize_name(preset_name, ppdname, sizeof(ppdname));
+      snprintf(msgid, sizeof(msgid), "preset-name.%s", preset_name);
+      ppd_put_strings(fp, langs, "APPrinterPreset", ppdname, msgid);
     }
   }
 
@@ -5635,7 +5714,7 @@ pwg_ppdize_name(const char *ipp,	/* I - IPP keyword */
 	*end;				/* End of name buffer */
 
 
-  if (!ipp)
+  if (!ipp || !_cups_isalnum(*ipp))
   {
     *name = '\0';
     return;
@@ -5650,8 +5729,14 @@ pwg_ppdize_name(const char *ipp,	/* I - IPP keyword */
       ipp ++;
       *ptr++ = (char)toupper(*ipp++ & 255);
     }
-    else
+    else if (*ipp == '_' || *ipp == '.' || *ipp == '-' || _cups_isalnum(*ipp))
+    {
       *ptr++ = *ipp++;
+    }
+    else
+    {
+      ipp ++;
+    }
   }
 
   *ptr = '\0';

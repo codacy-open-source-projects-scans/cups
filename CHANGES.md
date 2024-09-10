@@ -4,11 +4,18 @@ CHANGES - OpenPrinting CUPS 2.5b1 - (TBA)
 Changes in CUPS v2.5b1 (TBA)
 ----------------------------
 
-- Added `cupsDNSSD` APIs.
+- Added multiple language support for IPP Everywhere.
 - Added `cupsConcatString`, `cupsCopyString`, and `cupsFormatString` string
   APIs.
-- Added multiple language support for IPP Everywhere.
-- Added new APIs for form, JSON, JWT, IPP, and raster setup.
+- Added new `cupsRasterInitHeader` API.
+- Added `httpConnectURI` API.
+- Added `ippAddCredentialsString`, `ippGetFirstAttribute`,
+  `ippGetNextAttribute`, `ippRestore`, and `ippSave` APIs.
+- Added new DNS-SD APIs.
+- Added new JSON APIs.
+- Added new JWT APIs.
+- Added new OAuth APIs.
+- Added new WWW form APIs.
 - Added "job-sheets-col" support (Issue #138)
 - Added "--list-all" option for cupsfilter (Issue #194)
 - Added support for wide-area DNS-SD with Avahi (Issue #319)
@@ -24,6 +31,7 @@ Changes in CUPS v2.5b1 (TBA)
 - Added Docker support (Issue #929)
 - Added a systemd slice to the systemd services included with the scheduler
 - Added localizations for deprecated IPP attributes/options (Issue #1020)
+- Added support for specifying permissions with the `cupsFileOpen` API.
 - Updated CUPS to require TLS support - OpenSSL, GNUTLS and LibreSSL are
   supported.
 - Updated CUPS to require ZLIB.
