@@ -112,6 +112,7 @@
     <ClCompile Include="..\cups\adminutil.c" />
     <ClCompile Include="..\cups\array.c" />
     <ClCompile Include="..\cups\auth.c" />
+    <ClCompile Include="..\cups\clock.c" />
     <ClCompile Include="..\cups\debug.c" />
     <ClCompile Include="..\cups\dest-job.c" />
     <ClCompile Include="..\cups\dest-localization.c" />
@@ -140,6 +141,7 @@
     <ClCompile Include="..\cups\md5.c" />
     <ClCompile Include="..\cups\md5passwd.c" />
     <ClCompile Include="..\cups\notify.c" />
+    <ClCompile Include="..\cups\oauth.c" />
     <ClCompile Include="..\cups\options.c" />
     <ClCompile Include="..\cups\ppd-attr.c" />
     <ClCompile Include="..\cups\ppd-cache.c" />
@@ -195,6 +197,7 @@
     <ClInclude Include="..\cups\language-private.h" />
     <ClInclude Include="..\cups\language.h" />
     <ClInclude Include="..\cups\md5-private.h" />
+    <ClInclude Include="..\cups\oauth.h" />
     <ClInclude Include="..\cups\ppd-private.h" />
     <ClInclude Include="..\cups\ppd.h" />
     <ClInclude Include="..\cups\pwg-private.h" />

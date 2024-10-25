@@ -145,6 +145,7 @@ AC_CHECK_HEADER([iconv.h], [
 	AC_DEFINE([HAVE_ICONV_H], [1], [Have <iconv.h> header?])
 	SAVELIBS="$SAVELIBS $LIBS"
     ])
+    PKGCONFIG_LIBS_STATIC="$PKGCONFIG_LIBS_STATIC $LIBS"
     LIBS="$SAVELIBS"
 ])
 
@@ -360,6 +361,7 @@ AS_CASE([$host_os_name], [darwin*], [
     LIBS="-framework SystemConfiguration $LIBS"
     AC_CHECK_FUNCS([SCDynamicStoreCopyComputerName], [
 	AC_DEFINE([HAVE_SCDYNAMICSTORECOPYCOMPUTERNAME], [1], [Have SCDynamicStoreCopyComputerName function?])
+	PKGCONFIG_LIBS_STATIC="-framework SystemConfiguration $PKGCONFIG_LIBS_STATIC"
     ],[
 	LIBS="$SAVELIBS"
     ])

@@ -647,7 +647,6 @@ ac_includes_default="\
 #endif"
 
 ac_header_c_list=
-ac_default_prefix=/
 ac_subst_vars='LTLIBOBJS
 LIBOBJS
 UNINSTALL_LANGUAGES
@@ -680,8 +679,6 @@ CUPS_LOG_FILE_PERM
 CUPS_CUPSD_FILE_PERM
 CUPS_CONFIG_FILE_PERM
 CUPS_EXE_FILE_PERM
-CUPS_RESOURCEDIR
-CUPS_BUNDLEDIR
 LANGUAGES
 XINETD
 RCSTOP
@@ -914,8 +911,6 @@ with_rcstart
 with_rcstop
 with_xinetd
 with_languages
-with_bundledir
-with_bundlelang
 with_exe_file_perm
 with_config_file_perm
 with_cupsd_file_perm
@@ -1648,9 +1643,6 @@ Optional Packages:
   --with-rcstop           set stop number for rc scripts
   --with-xinetd           set path for xinetd config files
   --with-languages        set installed languages, default=all
-  --with-bundledir        set localization bundle directory
-  --with-bundlelang       set localization bundle base language (English or
-                          en)
   --with-exe-file-perm    set default executable permissions value,
                           default=0755
   --with-config-file-perm set default ConfigFilePerm value, default=0640
@@ -6184,6 +6176,7 @@ printf "%s\n" "#define HAVE_ICONV_H 1" >>confdefs.h
 
 fi
 
+    PKGCONFIG_LIBS_STATIC="$PKGCONFIG_LIBS_STATIC $LIBS"
     LIBS="$SAVELIBS"
 
 fi
@@ -6801,6 +6794,7 @@ then :
 
 printf "%s\n" "#define HAVE_SCDYNAMICSTORECOPYCOMPUTERNAME 1" >>confdefs.h
 
+	PKGCONFIG_LIBS_STATIC="-framework SystemConfiguration $PKGCONFIG_LIBS_STATIC"
 
 else $as_nop
 
@@ -7025,12 +7019,10 @@ esac
 
 
 
-
-
 if test "$prefix" = "NONE"
 then :
 
-    prefix="/"
+    prefix="/usr/local"
 
 fi
 
@@ -8287,6 +8279,8 @@ printf "%s\n" "#define HAVE_RESOLV_H 1" >>confdefs.h
 
 fi
 
+SAVELIBS="$LIBS"
+LIBS=""
 { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for library containing socket" >&5
 printf %s "checking for library containing socket... " >&6; }
 if test ${ac_cv_search_socket+y}
@@ -8726,6 +8720,8 @@ fi
 
 fi
 
+PKGCONFIG_LIBS_STATIC="$PKGCONFIG_LIBS_STATIC $LIBS"
+LIBS="$SAVELIBS $LIBS"
 
 ac_fn_c_check_member "$LINENO" "struct sockaddr" "sa_len" "ac_cv_member_struct_sockaddr_sa_len" "#include <sys/socket.h>
 "
@@ -11080,75 +11076,6 @@ fi
 
 
 
-# Check whether --with-bundledir was given.
-if test ${with_bundledir+y}
-then :
-  withval=$with_bundledir;
-    CUPS_BUNDLEDIR="$withval"
-
-else $as_nop
-
-    if test "x$host_os_name" = xdarwin -a $host_os_version -ge 100
-then :
-
-        CUPS_BUNDLEDIR="/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/PrintCore.framework/Versions/A"
-	LANGUAGES=""
-
-else $as_nop
-
-	CUPS_BUNDLEDIR=""
-
-fi
-
-fi
-
-
-
-if test "x$CUPS_BUNDLEDIR" != x
-then :
-
-
-printf "%s\n" "#define CUPS_BUNDLEDIR \"$CUPS_BUNDLEDIR\"" >>confdefs.h
-
-
-fi
-
-
-# Check whether --with-bundlelang was given.
-if test ${with_bundlelang+y}
-then :
-  withval=$with_bundlelang;
-    cups_bundlelang="$withval"
-
-else $as_nop
-
-    if test $host_os_version -ge 190
-then :
-
-	cups_bundlelang="en"
-
-else $as_nop
-
-	cups_bundlelang="English"
-
-fi
-
-fi
-
-
-if test "x$cups_bundlelang" != x -a "x$CUPS_BUNDLEDIR" != x
-then :
-
-    CUPS_RESOURCEDIR="$CUPS_BUNDLEDIR/Resources/$cups_bundlelang.lproj"
-
-else $as_nop
-
-    CUPS_RESOURCEDIR=""
-
-fi
-
-
-
 # Check whether --with-exe_file_perm was given.
 if test ${with_exe_file_perm+y}
 then :
@@ -11926,6 +11853,14 @@ fi
 
 
 
+
+if test x$enable_shared = xno
+then :
+
+    PKGCONFIG_LIBS="$PKGCONFIG_LIBS $PKGCONFIG_LIBS_STATIC"
+    PKGCONFIG_LIBS_STATIC=""
+
+fi
 
 INSTALL_LANGUAGES=""
 UNINSTALL_LANGUAGES=""

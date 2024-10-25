@@ -525,7 +525,7 @@ cupsCreateCredentialsRequest(
   }
 
   http_make_path(csrfile, sizeof(csrfile), path, common_name, "csr");
-  http_make_path(keyfile, sizeof(keyfile), path, common_name, "key");
+  http_make_path(keyfile, sizeof(keyfile), path, common_name, "ktm");
 
   // Create the encryption key...
   DEBUG_puts("1cupsCreateCredentialsRequest: Creating key pair.");
@@ -829,7 +829,7 @@ cupsGetCredentialsTrust(
   }
 
   // Look this common name up in the default keychains...
-  if ((tcreds = cupsCopyCredentials(path, common_name)) != NULL)
+  if (num_certs == 1 && (tcreds = cupsCopyCredentials(path, common_name)) != NULL)
   {
     char	credentials_str[1024],	// String for incoming credentials
 		tcreds_str[1024];	// String for saved credentials
@@ -1592,7 +1592,7 @@ _httpTLSStart(http_t *http)		// I - Connection to server
     }
 
     status = gnutls_server_name_set(http->tls, GNUTLS_NAME_DNS, hostname, strlen(hostname));
-    if (!status && (credentials = _httpUseCredentials(cg->tls_credentials)) == NULL)
+    if (!status && (credentials = _httpUseCredentials(cg->credentials)) == NULL)
     {
       if ((credentials = _httpCreateCredentials(NULL, NULL)) == NULL)
         status = -1;

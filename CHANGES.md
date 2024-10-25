@@ -32,7 +32,10 @@ Changes in CUPS v2.5b1 (TBA)
 - Added a systemd slice to the systemd services included with the scheduler
 - Added localizations for deprecated IPP attributes/options (Issue #1020)
 - Added support for specifying permissions with the `cupsFileOpen` API.
-- Updated documents (Issue #984)
+- Added new `cupsGetClock` API.
+- Added new `cupsParseOptions2` API with "end" argument.
+- Updated documentation (Issue #984)
+- Updated the configure script to default to installing to /usr/local.
 - Updated CUPS to require TLS support - OpenSSL, GNUTLS and LibreSSL are
   supported.
 - Updated CUPS to require ZLIB.
@@ -59,6 +62,8 @@ Changes in CUPS v2.5b1 (TBA)
 - Updated the maximum file descriptor limit for `cupsd` to 64k-1 (Issue #989)
 - Updated `httpConnectAgain` to re-validate the server's X.509 certificate
   (Issue #1061)
+- Updated the raster functions to report more issues via
+  `cupsRasterGetErrorString`.
 - Deprecated the "page-border" Job Template attribute (Issue #1020)
 - Fixed use-after-free in `cupsdAcceptClient()` when we log warning during error
   handling (fixes CVE-2023-34241)
