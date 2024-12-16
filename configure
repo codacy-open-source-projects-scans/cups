@@ -7019,10 +7019,15 @@ esac
 
 
 
-if test "$prefix" = "NONE"
+if test "$prefix" = NONE
 then :
 
-    prefix="/usr/local"
+    # Default prefix isn't bound until AC_OUTPUT...
+    realprefix="/usr/local"
+
+else $as_nop
+
+    realprefix="$prefix"
 
 fi
 
@@ -7036,7 +7041,7 @@ then :
 
 else $as_nop
 
-	exec_prefix="$prefix"
+	exec_prefix="$realprefix"
 
 fi
 
@@ -7074,7 +7079,7 @@ then :
 
 else $as_nop
 
-	datarootdir="$prefix/share"
+	datarootdir="$realprefix/share"
 
 fi
 
@@ -7090,7 +7095,7 @@ then :
 
 else $as_nop
 
-	datadir="$prefix/share"
+	datadir="$realprefix/share"
 
 fi
 
@@ -7101,10 +7106,19 @@ then :
 
 fi
 
-if test "$includedir" = "\${prefix}/include" -a "$prefix" = "/"
+if test "$includedir" = "\${prefix}/include"
 then :
 
-    includedir="/usr/include"
+    if test "$prefix" = "/"
+then :
+
+	includedir="/usr/include/libcups2"
+
+else $as_nop
+
+	includedir="$realprefix/include/libcups2"
+
+fi
 
 fi
 if test "$includedir" != "/usr/include"
@@ -7133,7 +7147,7 @@ fi
 
 else $as_nop
 
-	localstatedir="$prefix/var"
+	localstatedir="$realprefix/var"
 
 fi
 
@@ -7158,7 +7172,7 @@ fi
 
 else $as_nop
 
-	sysconfdir="$prefix/etc"
+	sysconfdir="$realprefix/etc"
 
 fi
 
@@ -8241,6 +8255,8 @@ esac
 fi
 
 # Add general compiler options per platform...
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for OS-specific compiler options" >&5
+printf %s "checking for OS-specific compiler options... " >&6; }
 case $host_os_name in #(
   linux*) :
 
@@ -8256,6 +8272,48 @@ then :
 	RELROFLAGS="-Wl,-z,relro,-z,now"
 
 fi
+
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: -D_GNU_SOURCE -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 $RELROFLAGS" >&5
+printf "%s\n" "-D_GNU_SOURCE -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 $RELROFLAGS" >&6; }
+ ;; #(
+  darwin*) :
+
+    # When not building for debug, target macOS 11 or later, "universal"
+    # binaries when possible...
+    if echo "$CPPFLAGS $CFLAGS $LDFLAGS $OPTIM" | grep -q "\\-arch "
+then :
+
+	# Don't add architecture/min-version flags if they are already present
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: none" >&5
+printf "%s\n" "none" >&6; }
+
+elif echo "$CPPFLAGS $CFLAGS $LDFLAGS $OPTIM" | grep -q "\\-mmacosx-version-"
+then :
+
+	# Don't add architecture/min-version flags if they are already present
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: none" >&5
+printf "%s\n" "none" >&6; }
+
+elif test "$host_os_version" -ge 200 -a x$enable_debug != xyes
+then :
+
+	# macOS 11.0 and higher support the Apple Silicon (arm64) CPUs
+	OPTIM="$OPTIM -mmacosx-version-min=11.0 -arch x86_64 -arch arm64"
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: -mmacosx-version-min=11.0 -arch x86_64 -arch arm64" >&5
+printf "%s\n" "-mmacosx-version-min=11.0 -arch x86_64 -arch arm64" >&6; }
+
+else $as_nop
+
+	# Don't add architecture/min-version flags if debug enabled
+	{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: none" >&5
+printf "%s\n" "none" >&6; }
+
+fi
+ ;; #(
+  *) :
+
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: none" >&5
+printf "%s\n" "none" >&6; }
  ;; #(
   *) :
      ;;
@@ -8767,7 +8825,7 @@ then :
   darwin*) :
 
 	    # Darwin and macOS do their own thing...
-	    CUPS_DEFAULT_DOMAINSOCKET="$localstatedir/run/cupsd"
+	    CUPS_DEFAULT_DOMAINSOCKET="/private/var/run/cupsd"
 	 ;; #(
   *) :
 

@@ -1,8 +1,8 @@
 CHANGES - OpenPrinting CUPS 2.5b1 - (TBA)
 ==============================================
 
-Changes in CUPS v2.5b1 (TBA)
-----------------------------
+Changes in CUPS v2.5b1 (YYYY-MM-DD)
+-----------------------------------
 
 - Added multiple language support for IPP Everywhere.
 - Added `cupsConcatString`, `cupsCopyString`, and `cupsFormatString` string
@@ -34,7 +34,7 @@ Changes in CUPS v2.5b1 (TBA)
 - Added support for specifying permissions with the `cupsFileOpen` API.
 - Added new `cupsGetClock` API.
 - Added new `cupsParseOptions2` API with "end" argument.
-- Updated documentation (Issue #984)
+- Updated documentation (Issue #984, Issue #1086)
 - Updated the configure script to default to installing to /usr/local.
 - Updated CUPS to require TLS support - OpenSSL, GNUTLS and LibreSSL are
   supported.
@@ -64,6 +64,8 @@ Changes in CUPS v2.5b1 (TBA)
   (Issue #1061)
 - Updated the raster functions to report more issues via
   `cupsRasterGetErrorString`.
+- Updated the `ipptool` utility to support the `--bearer-token` and
+  `--client-name` options.
 - Deprecated the "page-border" Job Template attribute (Issue #1020)
 - Fixed use-after-free in `cupsdAcceptClient()` when we log warning during error
   handling (fixes CVE-2023-34241)
@@ -89,6 +91,8 @@ Changes in CUPS v2.5b1 (TBA)
 - Fixed memory leak when unloading a job (Issue #813)
 - Fixed memory leak when creating color profiles (Issue #814)
 - Fixed punch finisher support for IPP Everywhere printers (Issue #821)
+- Fixed staple and bind finisher support for IPP Everywhere printers
+  (Issue #1073)
 - Fixed crash in `scan_ps()` if incoming argument is NULL (Issue #831)
 - Fixed setting job state reasons for successful jobs (Issue #832)
 - Fixed infinite loop in IPP backend if hostname is IP address with Kerberos
@@ -112,6 +116,7 @@ Changes in CUPS v2.5b1 (TBA)
 - Fixed sending response headers to client (Issue #927)
 - Fixed `Host` header regression (Issue #967)
 - Fixed DNS-SD lookups of local services with Avahi (Issue #970)
+- Fixed debug printfs PID substitution support (Issue #1066)
 - Fixed CGI program initialization and validation of form checkbox and text
   fields.
 - Fixed finishing support in ippeveps.

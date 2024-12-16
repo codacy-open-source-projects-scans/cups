@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <meta name="creator" content="mantohtml v2.0.1">
+    <meta name="creator" content="mantohtml v2.0.2">
     <title>ipptool(1)</title>
   </head>
   <body>
@@ -13,6 +13,12 @@
 <p><strong>ipptool</strong>
 [
 <strong>--help</strong>
+] [
+<strong>--bearer-token</strong>
+<em>BEARER-TOKEN</em>
+] [
+<strong>--client-name</strong>
+<em>CLIENT-NAME</em>
 ] [
 <strong>--ippfile</strong>
 <em>FILENAME</em>
@@ -90,12 +96,19 @@ Output is either a plain text, formatted text, CSV, JSON, or XML report on the s
 The
 <em>testfile</em>
 format is described in
-<strong>ipptoolfile</strong>(5).
+<a href="ipptoolfile.html"><strong>ipptoolfile</strong>(5).</a>
 
 </p>
     <h2 id="ipptool-1.options">Options</h2>
 <p>The following options are recognized by
 <strong>ipptool:</strong>
+</p>
+    <p style="margin-left: 2.5em; text-indent: -2.5em;"><strong>--bearer-token </strong><em>BEARER-TOKEN</em><br>
+Specifies the OAuth 2.0 token to use for HTTP Bearer authentication (RFC 6750).
+</p>
+    <p style="margin-left: 2.5em; text-indent: -2.5em;"><strong>--client-namne </strong><em>CLIENT-NAME</em><br>
+Specifies the client name to use for the TLS client certificate.
+If not specified, no client certificate is used during negotiation.
 </p>
     <p style="margin-left: 2.5em; text-indent: -2.5em;"><strong>--help</strong><br>
 Shows program help.
@@ -103,7 +116,7 @@ Shows program help.
     <p style="margin-left: 2.5em; text-indent: -2.5em;"><strong>--ippfile </strong><em>FILENAME</em><br>
 Specifies that the test results should be written to the named IPP file.
 These files can be used with programs like
-<strong>ippeveprinter</strong>(1).
+<a href="ippeveprinter.html"><strong>ippeveprinter</strong>(1).</a>
 
 </p>
     <p style="margin-left: 2.5em; text-indent: -2.5em;"><strong>--stop-after-include-error</strong><br>
@@ -295,7 +308,7 @@ program is unique to CUPS and conforms to the Internet Printing Protocol up to v
         ipp://localhost/printers/myprinter create-printer-subscription.test
 </pre>
     <h2 id="ipptool-1.see-also">See Also</h2>
-<p><strong>ipptoolfile</strong>(5),
+<a href="ipptoolfile.html"><p><strong>ipptoolfile</strong>(5),</a>
 
 IANA IPP Registry (<a href="https://www.iana.org/assignments/ipp-registrations">https://www.iana.org/assignments/ipp-registrations</a>),
 PWG Internet Printing Protocol Workgroup (<a href="https://www.pwg.org/ipp">https://www.pwg.org/ipp</a>),

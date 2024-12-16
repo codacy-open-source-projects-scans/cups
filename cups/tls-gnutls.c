@@ -11,6 +11,9 @@
 // information.
 //
 
+#include <gnutls/abstract.h>
+
+
 //
 // Local functions...
 //
@@ -178,11 +181,13 @@ cupsCreateCredentials(
   bool			ret = false;	// Return value
   gnutls_x509_crt_t	crt = NULL;	// New certificate
   gnutls_x509_privkey_t	key = NULL;	// Encryption private key
+  gnutls_pubkey_t	pubkey = NULL;	// Encryption public key
   gnutls_x509_crt_t	root_crt = NULL;// Root certificate
   gnutls_x509_privkey_t	root_key = NULL;// Root private key
   char			defpath[1024],	// Default path
  			crtfile[1024],	// Certificate filename
 			keyfile[1024],	// Private key filename
+			pubfile[1024],	// Public key filename
  			*root_crtdata,	// Root certificate data
 			*root_keydata;	// Root private key data
   unsigned		gnutls_usage = 0;// GNU TLS keyUsage bits
@@ -208,6 +213,7 @@ cupsCreateCredentials(
 
   http_make_path(crtfile, sizeof(crtfile), path, common_name, "crt");
   http_make_path(keyfile, sizeof(keyfile), path, common_name, "key");
+  http_make_path(pubfile, sizeof(pubfile), path, common_name, "pub");
 
   // Create the encryption key...
   DEBUG_puts("1cupsCreateCredentials: Creating key pair.");
@@ -414,6 +420,39 @@ cupsCreateCredentials(
 
   DEBUG_puts("1cupsCreateCredentials: Successfully created credentials.");
 
+  bytes = sizeof(buffer);
+
+  if ((err = gnutls_pubkey_init(&pubkey)) < 0)
+  {
+    DEBUG_printf("1cupsCreateCredentials: Unable to create public key: %s", gnutls_strerror(err));
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, gnutls_strerror(err), 0);
+    goto done;
+  }
+  else if ((err = gnutls_pubkey_import_x509(pubkey, crt, /*flags*/0)) < 0)
+  {
+    DEBUG_printf("1cupsCreateCredentials: Unable to import public key: %s", gnutls_strerror(err));
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, gnutls_strerror(err), 0);
+    goto done;
+  }
+  else if ((err = gnutls_pubkey_export(pubkey, GNUTLS_X509_FMT_PEM, buffer, &bytes)) < 0)
+  {
+    DEBUG_printf("1cupsCreateCredentials: Unable to export public key: %s", gnutls_strerror(err));
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, gnutls_strerror(err), 0);
+    goto done;
+  }
+  else if ((fp = cupsFileOpen(pubfile, "w")) != NULL)
+  {
+    DEBUG_printf("1cupsCreateCredentials: Writing public key to \"%s\".", keyfile);
+    cupsFileWrite(fp, (char *)buffer, bytes);
+    cupsFileClose(fp);
+  }
+  else
+  {
+    DEBUG_printf("1cupsCreateCredentials: Unable to create public key file \"%s\": %s", keyfile, strerror(errno));
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(errno), 0);
+    goto done;
+  }
+
   ret = true;
 
   // Cleanup...
@@ -423,6 +462,8 @@ cupsCreateCredentials(
     gnutls_x509_crt_deinit(crt);
   if (key)
     gnutls_x509_privkey_deinit(key);
+  if (pubkey)
+    gnutls_pubkey_deinit(pubkey);
 
   return (ret);
 }
@@ -502,9 +543,11 @@ cupsCreateCredentialsRequest(
   bool			ret = false;	// Return value
   gnutls_x509_crq_t	crq = NULL;	// Certificate request
   gnutls_x509_privkey_t	key = NULL;	// Private/public key pair
+  gnutls_pubkey_t	pubkey = NULL;	// Encryption public key
   char			defpath[1024],	// Default path
  			csrfile[1024],	// Certificate signing request filename
-			keyfile[1024];	// Private key filename
+			keyfile[1024],	// Private key filename
+			pubfile[1024];	// Public key filename
   unsigned		gnutls_usage = 0;// GNU TLS keyUsage bits
   cups_file_t		*fp;		// Key/cert file
   unsigned char		buffer[8192];	// Buffer for key/cert data
@@ -526,6 +569,7 @@ cupsCreateCredentialsRequest(
 
   http_make_path(csrfile, sizeof(csrfile), path, common_name, "csr");
   http_make_path(keyfile, sizeof(keyfile), path, common_name, "ktm");
+  http_make_path(pubfile, sizeof(pubfile), path, common_name, "pub");
 
   // Create the encryption key...
   DEBUG_puts("1cupsCreateCredentialsRequest: Creating key pair.");
@@ -555,7 +599,7 @@ cupsCreateCredentialsRequest(
     goto done;
   }
 
-  // Create the certificate...
+  // Create the certificate signing request...
   DEBUG_puts("1cupsCreateCredentialsRequest: Generating X.509 certificate request.");
 
   if (!organization)
@@ -660,6 +704,39 @@ cupsCreateCredentialsRequest(
 
   DEBUG_puts("1cupsCreateCredentialsRequest: Successfully created credentials request.");
 
+  bytes = sizeof(buffer);
+
+  if ((err = gnutls_pubkey_init(&pubkey)) < 0)
+  {
+    DEBUG_printf("1cupsCreateCredentials: Unable to create public key: %s", gnutls_strerror(err));
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, gnutls_strerror(err), 0);
+    goto done;
+  }
+  else if ((err = gnutls_pubkey_import_x509_crq(pubkey, crq, /*flags*/0)) < 0)
+  {
+    DEBUG_printf("1cupsCreateCredentials: Unable to import public key: %s", gnutls_strerror(err));
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, gnutls_strerror(err), 0);
+    goto done;
+  }
+  else if ((err = gnutls_pubkey_export(pubkey, GNUTLS_X509_FMT_PEM, buffer, &bytes)) < 0)
+  {
+    DEBUG_printf("1cupsCreateCredentials: Unable to export public key: %s", gnutls_strerror(err));
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, gnutls_strerror(err), 0);
+    goto done;
+  }
+  else if ((fp = cupsFileOpen(pubfile, "w")) != NULL)
+  {
+    DEBUG_printf("1cupsCreateCredentials: Writing public key to \"%s\".", keyfile);
+    cupsFileWrite(fp, (char *)buffer, bytes);
+    cupsFileClose(fp);
+  }
+  else
+  {
+    DEBUG_printf("1cupsCreateCredentials: Unable to create public key file \"%s\": %s", keyfile, strerror(errno));
+    _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(errno), 0);
+    goto done;
+  }
+
   ret = true;
 
   // Cleanup...
@@ -669,6 +746,8 @@ cupsCreateCredentialsRequest(
     gnutls_x509_crq_deinit(crq);
   if (key)
     gnutls_x509_privkey_deinit(key);
+  if (pubkey)
+    gnutls_pubkey_deinit(pubkey);
 
   return (ret);
 }
@@ -1734,7 +1813,7 @@ _httpTLSStart(http_t *http)		// I - Connection to server
     return (false);
   }
 
-  cupsCopyString(priority_string, "NORMAL", sizeof(priority_string));
+  cupsCopyString(priority_string, "@SYSTEM,NORMAL", sizeof(priority_string));
 
   if (tls_max_version < _HTTP_TLS_MAX)
   {
