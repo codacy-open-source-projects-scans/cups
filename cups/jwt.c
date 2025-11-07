@@ -1,7 +1,7 @@
 //
 // JSON Web Token API implementation for CUPS.
 //
-// Copyright © 2023-2024 by OpenPrinting.
+// Copyright © 2023-2025 by OpenPrinting.
 //
 // Licensed under Apache License v2.0.  See the file "LICENSE" for more
 // information.
@@ -10,6 +10,7 @@
 #include "cups-private.h"
 #include "jwt.h"
 #include "json-private.h"
+#include <assert.h>
 #ifdef HAVE_OPENSSL
 #  include <openssl/ecdsa.h>
 #  include <openssl/evp.h>
@@ -450,6 +451,7 @@ cupsJWTHasValidSignature(
 
 #ifdef HAVE_OPENSSL
         hash_len = cupsHashData(cups_jwa_algorithms[jwt->sigalg], text, text_len, hash, sizeof(hash));
+        assert(hash_len > 0);
 
         if ((rsa = make_rsa(jwk)) != NULL)
         {
@@ -486,6 +488,7 @@ cupsJWTHasValidSignature(
 
 #ifdef HAVE_OPENSSL
         hash_len = cupsHashData(cups_jwa_algorithms[jwt->sigalg], text, text_len, hash, sizeof(hash));
+        assert(hash_len > 0);
 
         if ((ec = make_ec_key(jwk, true)) != NULL)
         {
@@ -1261,7 +1264,8 @@ cupsJWTMakePublicKey(cups_json_t *jwk)	// I - Private JSON Web Key
 //
 
 cups_jwt_t *				// O - JWT object
-cupsJWTNew(const char *type)		// I - JWT type or `NULL` for default ("JWT")
+cupsJWTNew(const char  *type,		// I - JWT type or `NULL` for default ("JWT")
+           cups_json_t *claims)		// I - JSON claims or `NULL` for empty
 {
   cups_jwt_t	*jwt;			// JWT object
 
@@ -1272,7 +1276,12 @@ cupsJWTNew(const char *type)		// I - JWT type or `NULL` for default ("JWT")
     {
       cupsJSONNewString(jwt->jose, cupsJSONNewKey(jwt->jose, NULL, "typ"), type ? type : "JWT");
 
-      if ((jwt->claims = cupsJSONNew(NULL, NULL, CUPS_JTYPE_OBJECT)) != NULL)
+      if (claims)
+        jwt->claims = claims;
+      else
+        jwt->claims = cupsJSONNew(NULL, NULL, CUPS_JTYPE_OBJECT);
+
+      if (jwt->claims)
         return (jwt);
     }
   }
@@ -1467,6 +1476,8 @@ cupsJWTSign(cups_jwt_t  *jwt,		// I - JWT object
   cups_json_t	*sigx5c = NULL;		// X.509 certificate chain, if any
 
 
+  DEBUG_printf("cupsJWTSign(jwt=%p, alg=%d, jwk=%p)", (void *)jwt, alg, (void *)jwk);
+
   // Range check input...
   if (!jwt || alg <= CUPS_JWA_NONE || alg >= CUPS_JWA_MAX || !jwk)
   {
@@ -1475,7 +1486,7 @@ cupsJWTSign(cups_jwt_t  *jwt,		// I - JWT object
   }
 
   // Remove existing JOSE string, if any...
-  DEBUG_printf("1cupsJWTSign: jose=%p, jose_string=\"%s\"", jwt->jose, jwt->jose_string);
+  DEBUG_printf("1cupsJWTSign: jose=%p, jose_string=\"%s\"", (void *)jwt->jose, jwt->jose_string);
 
   _cupsJSONDelete(jwt->jose, "alg");
   _cupsJSONDelete(jwt->jose, "x5c");
@@ -1507,10 +1518,15 @@ cupsJWTSign(cups_jwt_t  *jwt,		// I - JWT object
 
     free(jwt->jose_string);
     jwt->jose_string = cupsJSONExportString(jwt->jose);
-    make_signature(jwt, alg, jwk, signature, &sigsize, &sigkid, NULL);
+
+    if (!make_signature(jwt, alg, jwk, signature, &sigsize, &sigkid, NULL))
+    {
+      DEBUG_puts("2cupsJWTSign: Unable to create X5C signature.");
+      return (false);
+    }
   }
 
-  DEBUG_printf("1cupsJWTSign: jose_string=\"%s\"", jwt->jose_string);
+  DEBUG_printf("1cupsJWTSign: jose_string=\"%s\", sigkid=\"%s\", sigsize=%u", jwt->jose_string, sigkid, (unsigned)sigsize);
 
   // Save the key ID and signature values...
   if (sigkid)
@@ -1688,7 +1704,7 @@ make_ec_key(cups_json_t *jwk,		// I - JSON web key
   y   = make_bignum(jwk, "y");
   d   = verify ? NULL : make_bignum(jwk, "d");
 
-  DEBUG_printf("4make_ec_key: crv=\"%s\", x=%p, y=%p, d=%p", crv, x, y, d);
+  DEBUG_printf("4make_ec_key: crv=\"%s\", x=%p, y=%p, d=%p", crv, (void *)x, (void *)y, (void *)d);
 
   if (!crv || ((!x || !y) && !d))
     goto ec_done;
@@ -1774,7 +1790,7 @@ make_rsa(cups_json_t *jwk)		// I - JSON web key
 
   rsa_done:
 
-  DEBUG_printf("4make_rsa: n=%p, e=%p, d=%p, p=%p, q=%p, dp=%p, dq=%p, qi=%p, rsa=%p", n, e, d, p, q, dp, dq, qi, rsa);
+  DEBUG_printf("4make_rsa: n=%p, e=%p, d=%p, p=%p, q=%p, dp=%p, dq=%p, qi=%p, rsa=%p", (void *)n, (void *)e, (void *)d, (void *)p, (void *)q, (void *)dp, (void *)dq, (void *)qi, (void *)rsa);
 
   if (!rsa)
   {
@@ -2107,6 +2123,8 @@ make_signature(cups_jwt_t    *jwt,	// I  - JWT
     if ((rsa = make_rsa(jwk)) != NULL)
     {
       hash_len = cupsHashData(cups_jwa_algorithms[alg], text, text_len, hash, sizeof(hash));
+      assert(hash_len > 0);
+
       if (RSA_sign(nids[alg - CUPS_JWA_RS256], hash, hash_len, signature, &siglen, rsa) == 1)
       {
         *sigsize = siglen;
@@ -2154,6 +2172,8 @@ make_signature(cups_jwt_t    *jwt,	// I  - JWT
     if ((ec = make_ec_key(jwk, false)) != NULL)
     {
       hash_len = cupsHashData(cups_jwa_algorithms[alg], text, text_len, hash, sizeof(hash));
+      assert(hash_len > 0);
+
       if ((ec_sig = ECDSA_do_sign(hash, hash_len, ec)) != NULL)
       {
         // Get the raw coordinates...
@@ -2183,7 +2203,7 @@ make_signature(cups_jwt_t    *jwt,	// I  - JWT
       sig_datum.data  = NULL;
       sig_datum.size  = 0;
 
-      if (!gnutls_privkey_sign_data(key, algs[alg - CUPS_JWA_RS256], 0, &text_datum, &sig_datum) && sig_datum.size <= *sigsize)
+      if (!gnutls_privkey_sign_data(key, algs[alg - CUPS_JWA_ES256], 0, &text_datum, &sig_datum))
       {
         gnutls_datum_t	r, s;		// Signature coordinates
         unsigned sig_len;
@@ -2207,7 +2227,7 @@ make_signature(cups_jwt_t    *jwt,	// I  - JWT
       }
       else
       {
-	DEBUG_printf("4make_signature: EC signing failed, sig_datum=%d bytes.", (int)sig_datum.size);
+	DEBUG_printf("4make_signature: EC signing failed, sig_datum=%d bytes, sigsize=%d.", (int)sig_datum.size, (int)*sigsize);
       }
       gnutls_free(sig_datum.data);
       gnutls_privkey_deinit(key);

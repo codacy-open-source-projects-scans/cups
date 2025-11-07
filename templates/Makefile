@@ -1,11 +1,10 @@
 #
 # Template makefile for CUPS.
 #
-# Copyright © 2020-2024 by OpenPrinting.
-# Copyright 2007-2017 by Apple Inc.
-# Copyright 1993-2007 by Easy Software Products.
+# Copyright © 2020-2025 by OpenPrinting.
 #
-# Licensed under Apache License v2.0.  See the file "LICENSE" for more information.
+# Licensed under Apache License v2.0.  See the file "LICENSE" for more
+# information.
 #
 
 include ../Makedefs
@@ -39,6 +38,7 @@ FILES	=	\
 		help-header.tmpl \
 		help-trailer.tmpl \
 		help-printable.tmpl \
+		home.tmpl \
 		job-cancel.tmpl \
 		job-hold.tmpl \
 		job-move.tmpl \
@@ -128,13 +128,11 @@ install:	all install-data install-headers install-libs install-exec
 # Install data files...
 #
 
-install-data: $(INSTALL_LANGUAGES)
+install-data:
 	$(INSTALL_DIR) -m 755 $(DATADIR)/templates
 	for file in $(FILES); do \
 		$(INSTALL_DATA) $$file $(DATADIR)/templates; \
 	done
-
-install-languages:
 	for lang in $(LANGUAGES); do \
 		if test -d $$lang; then \
 			$(INSTALL_DIR) -m 755 $(DATADIR)/templates/$$lang; \
@@ -143,8 +141,6 @@ install-languages:
 			done \
 		fi \
 	done
-
-install-langbundle:
 
 
 #
@@ -172,18 +168,14 @@ install-libs:
 # Uninstall files...
 #
 
-uninstall: $(UNINSTALL_LANGUAGES)
+uninstall:
 	for file in $(FILES); do \
 		$(RM) $(DATADIR)/templates/$$file; \
 	done
-	-$(RMDIR) $(DATADIR)/templates
-
-uninstall-languages:
 	for lang in $(LANGUAGES); do \
 		for file in $(FILES); do \
 			$(RM) $(DATADIR)/templates/$$lang/$$file; \
 		done \
 		$(RMDIR) $(DATADIR)/templates/$$lang; \
 	done
-
-uninstall-langbundle:
+	-$(RMDIR) $(DATADIR)/templates

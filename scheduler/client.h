@@ -1,7 +1,7 @@
 /*
  * Client definitions for the CUPS scheduler.
  *
- * Copyright © 2020-2024 by OpenPrinting.
+ * Copyright © 2020-2025 by OpenPrinting.
  * Copyright © 2007-2018 by Apple Inc.
  * Copyright © 1997-2007 by Easy Software Products, all rights reserved.
  *
@@ -34,8 +34,13 @@ struct cupsd_client_s
 					/* Username from Authorization: line */
 			password[HTTP_MAX_VALUE],
 					/* Password from Authorization: line */
-			uri[HTTP_MAX_URI],
-					/* Localized URL/URI for GET/PUT */
+			email[HTTP_MAX_VALUE],
+					/* EMail from OAuth Bearer token */
+			realname[HTTP_MAX_VALUE],
+					/* Real name from OAuth Bearer token */
+		      	autherror[HTTP_MAX_VALUE],
+					/* Authorization error, if any */
+			uri[2048],	/* Localized URL/URI for GET/PUT */
 			*filename,	/* Filename of output file */
 			*command,	/* Command to run */
 			*options,	/* Options for command */
@@ -49,7 +54,7 @@ struct cupsd_client_s
   int			sent_header,	/* Non-zero if sent HTTP header */
 			got_fields,	/* Non-zero if all fields seen */
 			header_used;	/* Number of header bytes used */
-  char			header[2048];	/* Header from CGI program */
+  char			header[4096];	/* Header from CGI program */
   cups_lang_t		*language;	/* Language to use */
   int			auto_ssl;	/* Automatic test for SSL/TLS */
   http_addr_t		clientaddr;	/* Client's server address */

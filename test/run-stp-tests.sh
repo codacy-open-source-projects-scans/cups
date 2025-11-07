@@ -3,7 +3,7 @@
 # Perform the complete set of IPP compliance tests specified in the
 # CUPS Software Test Plan.
 #
-# Copyright © 2020-2024 by OpenPrinting
+# Copyright © 2020-2025 by OpenPrinting
 # Copyright © 2007-2021 by Apple Inc.
 # Copyright © 1997-2007 by Easy Software Products, all rights reserved.
 #
@@ -115,7 +115,7 @@ case "$testtype" in
 	*)
 		echo "Running the timid tests (1)"
 		nprinters=0
-		pjobs=10
+		pjobs=2
 		pprinters=0
 		loglevel="debug2"
 		testtype="1"
@@ -256,14 +256,14 @@ case "$usedebugprintfs" in
 		echo "Enabling debug printfs (level 5); log files can be found in $BASE/log..."
 		CUPS_DEBUG_LOG="$BASE/log/debug_printfs.%d"; export CUPS_DEBUG_LOG
 		CUPS_DEBUG_LEVEL=5; export CUPS_DEBUG_LEVEL
-		CUPS_DEBUG_FILTER='^(http|_http|ipp|_ipp|cups.*Request|cupsGetResponse|cupsSend).*$'; export CUPS_DEBUG_FILTER
+		CUPS_DEBUG_FILTER='^(http|_http|ipp|_ipp|cupsCreate|cups.*Request|cupsGetResponse|cupsSend).*$'; export CUPS_DEBUG_FILTER
 		;;
 
 	0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9)
 		echo "Enabling debug printfs (level $usedebugprintfs); log files can be found in $BASE/log..."
 		CUPS_DEBUG_LOG="$BASE/log/debug_printfs.%d"; export CUPS_DEBUG_LOG
 		CUPS_DEBUG_LEVEL="$usedebugprintfs"; export CUPS_DEBUG_LEVEL
-		CUPS_DEBUG_FILTER='^(http|_http|ipp|_ipp|cups.*Request|cupsGetResponse|cupsSend).*$'; export CUPS_DEBUG_FILTER
+		CUPS_DEBUG_FILTER='^(http|_http|ipp|_ipp|cupsCreate|cups.*Request|cupsGetResponse|cupsSend).*$'; export CUPS_DEBUG_FILTER
 		;;
 
 	*)
@@ -365,21 +365,12 @@ ln -s $root/templates $BASE/share
 instfilter() {
 	# instfilter src dst format
 	#
-	# See if the filter exists in a standard location; if so, make a
-	# symlink, otherwise create a dummy script for the specified format.
+	# Create a dummy script for the specified format.
 	#
 	src="$1"
 	dst="$2"
 	format="$3"
 
-	for dir in /usr/local/libexec/cups/filter /usr/libexec/cups/filter /usr/lib/cups/filter; do
-		if test -x "$dir/$src"; then
-			ln -s "$dir/$src" "$BASE/bin/filter/$dst"
-			return
-		fi
-	done
-
-	# Source filter not present, create a dummy filter
 	case $format in
 		passthru)
 			ln -s gziptoany "$BASE/bin/filter/$dst"
@@ -529,10 +520,6 @@ PassEnv ASAN_OPTIONS
 
 Sandboxing Off
 EOF
-
-if test $ssltype != 0 -a `uname` = Darwin; then
-	echo "ServerKeychain $HOME/Library/Keychains/login.keychain" >> $BASE/cups-files.conf
-fi
 
 #
 # Setup lots of test queues with PPD files...

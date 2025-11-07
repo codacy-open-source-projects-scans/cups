@@ -1,7 +1,7 @@
 //
 // HTTP routines for CUPS.
 //
-// Copyright © 2022-2024 by OpenPrinting.
+// Copyright © 2022-2025 by OpenPrinting.
 // Copyright © 2007-2021 by Apple Inc.
 // Copyright © 1997-2007 by Easy Software Products, all rights reserved.
 //
@@ -30,7 +30,7 @@
 // Local functions...
 //
 
-static void		http_add_field(http_t *http, http_field_t field, const char *value, int append);
+static void		http_add_field(http_t *http, http_field_t field, const char *value, bool append);
 static void		http_content_coding_finish(http_t *http);
 static void		http_content_coding_start(http_t *http, const char *value);
 static http_t		*http_create(const char *host, int port, http_addrlist_t *addrlist, int family, http_encryption_t encryption, int blocking, _http_mode_t mode);
@@ -109,7 +109,7 @@ static const char * const http_fields[] =
 // listening socket "fd".  The "blocking" argument specifies whether the new
 // HTTP connection is blocking.
 //
-// @since CUPS 1.7/macOS 10.9@
+// @since CUPS 1.7@
 //
 
 http_t *				// O - HTTP connection or `NULL`
@@ -221,7 +221,7 @@ httpCheck(http_t *http)			// I - HTTP connection
 //
 // 'httpClearCookie()' - Clear the cookie value(s).
 //
-// @since CUPS 1.1.19/macOS 10.3@
+// @since CUPS 1.1.19@
 //
 
 void
@@ -230,11 +230,8 @@ httpClearCookie(http_t *http)		// I - HTTP connection
   if (!http)
     return;
 
-  if (http->cookie)
-  {
-    free(http->cookie);
-    http->cookie = NULL;
-  }
+  free(http->cookie);
+  http->cookie = NULL;
 }
 
 
@@ -294,6 +291,7 @@ httpClearFields(http_t *http)		// I - HTTP connection
 void
 httpClose(http_t *http)			// I - HTTP connection
 {
+  http_field_t	field;			// Current field
 #ifdef HAVE_GSSAPI
   OM_uint32	minor_status;		// Minor status code
 #endif // HAVE_GSSAPI
@@ -320,8 +318,7 @@ httpClose(http_t *http)			// I - HTTP connection
 
   httpAddrFreeList(http->addrlist);
 
-  if (http->cookie)
-    free(http->cookie);
+  free(http->cookie);
 
 #ifdef HAVE_GSSAPI
   if (http->gssctx != GSS_C_NO_CONTEXT)
@@ -336,7 +333,12 @@ httpClose(http_t *http)			// I - HTTP connection
     AuthorizationFree(http->auth_ref, kAuthorizationFlagDefaults);
 #endif // HAVE_AUTHORIZATION_H
 
-  httpClearFields(http);
+  for (field = HTTP_FIELD_ACCEPT_LANGUAGE; field < HTTP_FIELD_MAX; field ++)
+  {
+    free(http->default_fields[field]);
+    if (field >= HTTP_FIELD_ACCEPT_ENCODING || http->fields[field] != http->_fields[field])
+      free(http->fields[field]);
+  }
 
   if (http->authstring && http->authstring != http->_authstring)
     free(http->authstring);
@@ -400,7 +402,7 @@ httpConnect(const char *host,		// I - Host to connect to
 // specifies an integer variable that can be set to a non-zero value to cancel
 // the connection process.
 //
-// @since CUPS 1.7/macOS 10.9@
+// @since CUPS 1.7@
 //
 
 http_t *				// O - New HTTP connection
@@ -840,7 +842,7 @@ httpFlush(http_t *http)			// I - HTTP connection
 //
 // 'httpFlushWrite()' - Flush data written to a HTTP connection.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 int					// O - Bytes written or -1 on error
@@ -921,7 +923,7 @@ httpGetActivity(http_t *http)		// I - HTTP connection
 // string to use with @link httpSetField@ for the
 // `HTTP_FIELD_AUTHORIZATION` value.
 //
-// @since CUPS 1.3/macOS 10.5@
+// @since CUPS 1.3@
 //
 
 char *					// O - Authorization string
@@ -937,7 +939,7 @@ httpGetAuthString(http_t *http)		// I - HTTP connection
 //
 // 'httpGetBlocking()' - Get the blocking/non-blocking state of a connection.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 int					// O - 1 if blocking, 0 if non-blocking
@@ -956,7 +958,7 @@ httpGetBlocking(http_t *http)		// I - HTTP connection
 // client.  The value returned can be use in subsequent requests (for clients)
 // or in the response (for servers) in order to compress the content stream.
 //
-// @since CUPS 1.7/macOS 10.9@
+// @since CUPS 1.7@
 //
 
 const char *				// O - Content-Coding value or `NULL` for the identity coding.
@@ -1024,9 +1026,13 @@ httpGetContentEncoding(http_t *http)	// I - HTTP connection
 
 
 //
-// 'httpGetCookie()' - Get any cookie data from the response.
+// 'httpGetCookie()' - Get cookie data from the HTTP connection.
 //
-// @since CUPS 1.1.19/macOS 10.3@
+// This function returns any HTTP "Set-Cookie:" or "Cookie:" header data for the
+// given HTTP connection as described in RFC 6265.  Use the
+// @link httpGetCookieValue@ to get the value of a named "Cookie:" value.
+//
+// @since CUPS 1.1.19@
 //
 
 const char *				// O - Cookie data or `NULL`
@@ -1037,13 +1043,114 @@ httpGetCookie(http_t *http)		// I - HTTP connection
 
 
 //
+// 'httpGetCookieValue()' - Get the value of a named cookie from the HTTP connection.
+//
+// This function copies the value of a named cookie in the HTTP "Cookie:" header
+// for the given HTTP connection as described in RFC 6265.  Use the
+// @link httpGetCookie@ function to get the original "Cookie:" string.
+//
+// @since CUPS 2.5@
+//
+
+char *					// O - Cookie value or `NULL` if not present
+httpGetCookieValue(http_t     *http,	// I - HTTP connection
+                   const char *name,	// I - Cookie name
+                   char       *buffer,	// I - Value buffer
+                   size_t     bufsize)	// I - Size of value buffer
+{
+  const char	*cookie;		// Cookie: header value
+  char		current[128],		// Current name string
+		*ptr,			// Pointer into name/buffer
+		*end;			// End of name/buffer
+  bool		match;			// Does the current name match?
+
+
+  // Range check input...
+  if (buffer)
+    *buffer = '\0';
+
+  if (!http || !http->cookie || !name || !buffer || bufsize < 2)
+    return (NULL);
+
+  // Loop through the cookie string...
+  for (cookie = http->cookie; *cookie;)
+  {
+    // Skip leading whitespace...
+    while (isspace(*cookie & 255))
+      cookie ++;
+    if (!*cookie)
+      break;
+
+    // Copy the name...
+    for (ptr = current, end = current + sizeof(current) - 1; *cookie && *cookie != '=';)
+    {
+      if (ptr < end)
+        *ptr++ = *cookie++;
+      else
+	cookie ++;
+    }
+
+    if (*cookie != '=')
+      break;
+
+    *ptr = '\0';
+    match = !strcmp(current, name);
+    cookie ++;
+
+    // Then the value...
+    if (*cookie == '\"')
+    {
+      // Copy quoted value...
+      for (cookie ++, ptr = buffer, end = buffer + bufsize - 1; *cookie && *cookie != '\"';)
+      {
+        if (match && ptr < end)
+	  *ptr++ = *cookie++;
+	else
+	  cookie ++;
+      }
+
+      if (*cookie == '\"')
+        cookie ++;
+      else
+        match = false;
+    }
+    else
+    {
+      // Copy unquoted value...
+      for (ptr = buffer, end = buffer + bufsize - 1; *cookie && *cookie != ';';)
+      {
+        if (match && ptr < end)
+	  *ptr++ = *cookie++;
+	else
+	  cookie ++;
+      }
+    }
+
+    if (match)
+    {
+      // Got the value we were looking for, nul-terminate and return...
+      *ptr = '\0';
+      return (buffer);
+    }
+
+    // Skip over separator...
+    if (*cookie == ';')
+      cookie ++;
+  }
+
+  // If we get here then we never found the cookie...
+  return (NULL);
+}
+
+
+//
 // 'httpGetEncryption()' - Get the current encryption mode of a connection.
 //
 // This function returns the encryption mode for the connection. Use the
 // @link httpIsEncrypted@ function to determine whether a TLS session has
 // been established.
 //
-// @since CUPS 2.0/macOS 10.10@
+// @since CUPS 2.0@
 //
 
 http_encryption_t			// O - Current encryption mode
@@ -1075,7 +1182,7 @@ httpGetError(http_t *http)		// I - HTTP connection
 // Returns `HTTP_STATUS_NONE` if there is no Expect header, otherwise
 // returns the expected HTTP status code, typically `HTTP_STATUS_CONTINUE`.
 //
-// @since CUPS 1.7/macOS 10.9@
+// @since CUPS 1.7@
 //
 
 http_status_t				// O - Expect: status, if any
@@ -1091,7 +1198,7 @@ httpGetExpect(http_t *http)		// I - HTTP connection
 //
 // 'httpGetFd()' - Get the file descriptor associated with a connection.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 int					// O - File descriptor or -1 if none
@@ -1163,7 +1270,7 @@ httpGetLength(http_t *http)		// I - HTTP connection
 // This function returns the complete content length, even for
 // content larger than 2^31 - 1.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 off_t					// O - Content length
@@ -1449,7 +1556,7 @@ httpGetState(http_t *http)		// I - HTTP connection
 //
 // 'httpGetStatus()' - Get the status of the last HTTP request.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 http_status_t				// O - HTTP status
@@ -1478,7 +1585,7 @@ httpGetSubField(http_t       *http,	// I - HTTP connection
 //
 // 'httpGetSubField2()' - Get a sub-field value.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 char *					// O - Value or `NULL`
@@ -1726,7 +1833,7 @@ httpOptions(http_t     *http,		// I - HTTP connection
 //
 // For non-blocking connections the usual timeouts apply.
 //
-// @since CUPS 1.7/macOS 10.9@
+// @since CUPS 1.7@
 //
 
 ssize_t					// O - Number of bytes copied
@@ -1880,6 +1987,7 @@ httpPeek(http_t *http,			// I - HTTP connection
     {
       DEBUG_puts("2httpPeek: Unable to copy decompressor stream.");
       http->error = ENOMEM;
+      inflateEnd(&stream);
       return (-1);
     }
 
@@ -2040,7 +2148,7 @@ httpRead(http_t *http,			// I - HTTP connection
 //
 // 'httpRead2()' - Read data from a HTTP connection.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 ssize_t					// O - Number of bytes read
@@ -2216,7 +2324,7 @@ httpRead2(http_t *http,			// I - HTTP connection
 //
 // 'httpReadRequest()' - Read a HTTP request from a connection.
 //
-// @since CUPS 1.7/macOS 10.9@
+// @since CUPS 1.7@
 //
 
 http_state_t				// O - New state of connection
@@ -2438,7 +2546,7 @@ httpSaveCredentials(
 // `HTTP_FIELD_AUTHORIZATION` prior to issuing a HTTP request using
 // @link httpWriteRequest@.
 //
-// @since CUPS 1.3/macOS 10.5@
+// @since CUPS 1.3@
 //
 
 void
@@ -2447,6 +2555,8 @@ httpSetAuthString(http_t     *http,	// I - HTTP connection
 		  const char *data)	// I - Auth data (NULL for none)
 {
   // Range check input...
+  DEBUG_printf("httpSetAuthString(http=%p, scheme=\"%s\", data=\"%s\")", (void *)http, scheme, data);
+
   if (!http)
     return;
 
@@ -2479,6 +2589,8 @@ httpSetAuthString(http_t     *http,	// I - HTTP connection
     // Clear the current authorization string...
     http->_authstring[0] = '\0';
   }
+
+  DEBUG_printf("1httpSetAuthString: authstring=\"%s\"", http->authstring);
 }
 
 
@@ -2516,25 +2628,49 @@ httpSetCredentials(http_t	*http,		// I - HTTP connection
 
 
 //
-// 'httpSetCookie()' - Set the cookie value(s).
+// 'httpSetCookie()' - Add Set-Cookie value(s).
 //
-// @since CUPS 1.1.19/macOS 10.3@
+// This function adds one or more Set-Cookie header values that will be sent to
+// the client with the @link httpWriteResponse@ function.  Each value conforms
+// to the format defined in RFC 6265.  Multiple values can be passed in the
+// "cookie" string separated by a newline character.
+//
+// Call the @link httpClearCookies@ function to clear all Set-Cookie values.
+//
+// @since CUPS 1.1.19@
 //
 
 void
-httpSetCookie(http_t     *http,		// I - Connection
+httpSetCookie(http_t     *http,		// I - HTTP cnnection
               const char *cookie)	// I - Cookie string
 {
-  if (!http)
+  // Range check input...
+  if (!http || !cookie)
     return;
 
+  // Set or append the Set-Cookie value....
   if (http->cookie)
-    free(http->cookie);
+  {
+    // Append with a newline between values...
+    size_t	clen,			// Length of cookie string
+		ctotal;			// Total length of cookies
+    char	*temp;			// Temporary value
 
-  if (cookie)
-    http->cookie = strdup(cookie);
+    clen   = strlen(http->cookie);
+    ctotal = clen + strlen(cookie) + 2;
+
+    if ((temp = realloc(http->cookie, ctotal)) == NULL)
+      return;
+
+    http->cookie = temp;
+    temp[clen]   = '\n';
+    cupsCopyString(temp + clen + 1, cookie, ctotal - clen - 1);
+  }
   else
-    http->cookie = NULL;
+  {
+    // Just copy/set this cookie...
+    http->cookie = strdup(cookie);
+  }
 }
 
 
@@ -2544,7 +2680,7 @@ httpSetCookie(http_t     *http,		// I - Connection
 // Currently only `HTTP_FIELD_ACCEPT_ENCODING`, `HTTP_FIELD_SERVER`,
 // and `HTTP_FIELD_USER_AGENT` can be set.
 //
-// @since CUPS 1.7/macOS 10.9@
+// @since CUPS 1.7@
 //
 
 void
@@ -2611,7 +2747,7 @@ httpSetEncryption(
 // Currently only `HTTP_STATUS_CONTINUE` is supported for the "expect"
 // argument.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 void
@@ -2639,7 +2775,7 @@ httpSetField(http_t       *http,	// I - HTTP connection
   if (!http || field <= HTTP_FIELD_UNKNOWN || field >= HTTP_FIELD_MAX || !value)
     return;
 
-  http_add_field(http, field, value, 0);
+  http_add_field(http, field, value, false);
 }
 
 
@@ -2662,7 +2798,7 @@ httpSetKeepAlive(
 //
 // 'httpSetLength()' - Set the content-length and content-encoding.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 void
@@ -2696,7 +2832,7 @@ httpSetLength(http_t *http,		// I - HTTP connection
 // The optional timeout callback receives both the HTTP connection and a user
 // data pointer and must return 1 to continue or 0 to error (time) out.
 //
-// @since CUPS 1.5/macOS 10.7@
+// @since CUPS 1.5@
 //
 
 void
@@ -2890,7 +3026,7 @@ _httpUpdate(http_t        *http,	// I - HTTP connection
     }
     else if ((field = httpFieldValue(line)) != HTTP_FIELD_UNKNOWN)
     {
-      http_add_field(http, field, value, 1);
+      http_add_field(http, field, value, true);
 
       if (field == HTTP_FIELD_AUTHENTICATION_INFO)
         httpGetSubField2(http, HTTP_FIELD_AUTHENTICATION_INFO, "nextnonce", http->nextnonce, (int)sizeof(http->nextnonce));
@@ -2984,7 +3120,7 @@ _httpWait(http_t *http,			// I - HTTP connection
   }
 
   // Check the TLS buffers for data first...
-  if (http->tls && _httpTLSPending(http))
+  if (usessl && http->tls && _httpTLSPending(http))
   {
     DEBUG_puts("5_httpWait: Return 1 since there is pending TLS data.");
     return (1);
@@ -3013,7 +3149,7 @@ _httpWait(http_t *http,			// I - HTTP connection
 //
 // 'httpWait()' - Wait for data available on a connection.
 //
-// @since CUPS 1.1.19/macOS 10.3@
+// @since CUPS 1.1.19@
 //
 
 int					// O - 1 if data is available, 0 otherwise
@@ -3073,7 +3209,7 @@ httpWrite(http_t     *http,		// I - HTTP connection
 //
 // 'httpWrite2()' - Write data to a HTTP connection.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 ssize_t					// O - Number of bytes written
@@ -3256,7 +3392,7 @@ httpWriteRequest(http_t     *http,	// I - HTTP connection
 //
 // 'httpWriteResponse()' - Write a HTTP response to a client connection.
 //
-// @since CUPS 1.7/macOS 10.9@
+// @since CUPS 1.7@
 //
 
 int					// O - 0 on success, -1 on error
@@ -3354,18 +3490,34 @@ httpWriteResponse(http_t        *http,	// I - HTTP connection
 
     if (http->cookie)
     {
-      if (strchr(http->cookie, ';'))
+      char	*start,			// Start of cookie
+		*ptr;			// Pointer into cookie
+
+      for (start = http->cookie; start; start = ptr)
       {
-        if (httpPrintf(http, "Set-Cookie: %s\r\n", http->cookie) < 1)
+        if ((ptr = strchr(start, '\n')) != NULL)
+          *ptr = '\0';
+
+	if (strchr(start, ';'))
+	{
+	  if (httpPrintf(http, "Set-Cookie: %s\r\n", start) < 1)
+	  {
+	    http->status = HTTP_STATUS_ERROR;
+	    if (ptr)
+	      *ptr = '\n';
+	    return (-1);
+	  }
+	}
+	else if (httpPrintf(http, "Set-Cookie: %s; path=/; httponly;%s\r\n", start, http->tls ? " secure;" : "") < 1)
 	{
 	  http->status = HTTP_STATUS_ERROR;
+	  if (ptr)
+	    *ptr = '\n';
 	  return (-1);
 	}
-      }
-      else if (httpPrintf(http, "Set-Cookie: %s; path=/; httponly;%s\r\n", http->cookie, http->tls ? " secure;" : "") < 1)
-      {
-	http->status = HTTP_STATUS_ERROR;
-	return (-1);
+
+	if (ptr)
+	  *ptr++ = '\n';
       }
     }
 
@@ -3437,7 +3589,7 @@ static void
 http_add_field(http_t       *http,	// I - HTTP connection
                http_field_t field,	// I - HTTP field
                const char   *value,	// I - Value string
-               int          append)	// I - Append value?
+               bool         append)	// I - Append value?
 {
   char		temp[1024],		// Temporary value string
 		combined[HTTP_MAX_VALUE];
@@ -3544,9 +3696,11 @@ http_add_field(http_t       *http,	// I - HTTP connection
     http->fields[field] = strdup(value);
   }
 
+  DEBUG_printf("1http_add_field: New value of %s is \"%s\"", http_fields[field], http->fields[field]);
+
   if (field == HTTP_FIELD_CONTENT_ENCODING && http->data_encoding != HTTP_ENCODING_FIELDS)
   {
-    DEBUG_puts("1httpSetField: Calling http_content_coding_start.");
+    DEBUG_puts("1http_add_field: Calling http_content_coding_start.");
     http_content_coding_start(http, value);
   }
 }
@@ -4187,6 +4341,10 @@ http_send(http_t       *http,		// I - HTTP connection
   if (!http->fields[HTTP_FIELD_ACCEPT_ENCODING] && http->default_fields[HTTP_FIELD_ACCEPT_ENCODING])
     httpSetField(http, HTTP_FIELD_ACCEPT_ENCODING, http->default_fields[HTTP_FIELD_ACCEPT_ENCODING]);
 
+  // Set the Authorization field if it isn't already...
+  if (!http->fields[HTTP_FIELD_AUTHORIZATION] && http->authstring)
+    httpSetField(http, HTTP_FIELD_AUTHORIZATION, http->authstring);
+
   // Encode the URI as needed...
   _httpEncodeURI(buf, uri, sizeof(buf));
 
@@ -4544,7 +4702,7 @@ http_write(http_t     *http,		// I - HTTP connection
 
         http->error = WSAGetLastError();
       }
-      else if (WSAGetLastError() != http->error && WSAGetLastError() != WSAECONNRESET)
+      else if (WSAGetLastError() != http->error)
       {
         http->error = WSAGetLastError();
 	continue;
@@ -4564,7 +4722,7 @@ http_write(http_t     *http,		// I - HTTP connection
 
         http->error = errno;
       }
-      else if (errno != http->error && errno != ECONNRESET)
+      else if (errno != http->error)
       {
         http->error = errno;
 	continue;

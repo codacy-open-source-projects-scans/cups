@@ -1,22 +1,21 @@
-/*
- * Global variable access routines for CUPS.
- *
- * Copyright © 2020-2024 by OpenPrinting.
- * Copyright © 2007-2019 by Apple Inc.
- * Copyright © 1997-2007 by Easy Software Products, all rights reserved.
- *
- * Licensed under Apache License v2.0.  See the file "LICENSE" for more
- * information.
- */
-
-/*
- * Include necessary headers...
- */
+//
+// Global variable access routines for CUPS.
+//
+// Copyright © 2021-2025 by OpenPrinting.
+// Copyright © 2007-2019 by Apple Inc.
+// Copyright © 1997-2007 by Easy Software Products, all rights reserved.
+//
+// Licensed under Apache License v2.0.  See the file "LICENSE" for more
+// information.
+//
 
 #include "cups-private.h"
 #include "debug-internal.h"
 #ifndef _WIN32
 #  include <pwd.h>
+#  ifdef HAVE_SYS_AUXV_H
+#    include <sys/auxv.h> // for getauxval()
+#  endif
 #endif /* !_WIN32 */
 
 
@@ -121,6 +120,8 @@ _cupsGlobalUnlock(void)
 #ifdef _WIN32
 /*
  * 'DllMain()' - Main entry for library.
+ *
+ * @private@
  */
 
 BOOL WINAPI				/* O - Success/failure */
@@ -172,6 +173,8 @@ DllMain(HINSTANCE hinst,		/* I - DLL module handle */
 static _cups_globals_t *		/* O - Pointer to global data */
 cups_globals_alloc(void)
 {
+  const char	*cups_userconfig = getenv("CUPS_USERCONFIG");
+					/* Location of user config files */
   _cups_globals_t *cg = calloc(1, sizeof(_cups_globals_t));
 					/* Pointer to global data */
 
@@ -197,8 +200,6 @@ cups_globals_alloc(void)
   */
 
   cg->thread_id = ++ cups_global_index;
-
-  fprintf(stderr, "T%d cups_globals_alloc\n", cg->thread_id);
 #endif /* DEBUG */
 
  /*
@@ -268,26 +269,31 @@ cups_globals_alloc(void)
   if ((cg->localedir = getenv("LOCALEDIR")) == NULL)
     cg->localedir = localedir;
 
-  if (!userconfig[0])
+  if (cups_userconfig)
   {
-    const char	*userprofile = getenv("USERPROFILE");
-				// User profile (home) directory
-    char	*userptr;	// Pointer into userconfig
-
-    DEBUG_printf("cups_globals_alloc: USERPROFILE=\"%s\"", userprofile);
-
-    snprintf(userconfig, sizeof(userconfig), "%s/AppData/Local/cups", userprofile);
-    for (userptr = userconfig; *userptr; userptr ++)
+    // Use CUPS_USERCONFIG environment variable...
+    cg->userconfig = cups_userconfig;
+  }
+  else
+  {
+    // Use the USERPROFILE environment variable to find the user configuration directory...
+    if (!userconfig[0])
     {
-      // Convert back slashes to forward slashes
-      if (*userptr == '\\')
-        *userptr = '/';
+      const char	*userprofile = getenv("USERPROFILE");
+				// User profile (home) directory
+      char	*userptr;	// Pointer into userconfig
+
+      snprintf(userconfig, sizeof(userconfig), "%s/AppData/Local/cups", userprofile);
+      for (userptr = userconfig; *userptr; userptr ++)
+      {
+	// Convert back slashes to forward slashes
+	if (*userptr == '\\')
+	  *userptr = '/';
+      }
     }
 
-    DEBUG_printf("cups_globals_alloc: userconfig=\"%s\"", userconfig);
+    cg->userconfig = userconfig;
   }
-
-  cg->userconfig = userconfig;
 
 #else
   const char	*home = getenv("HOME");	// HOME environment variable
@@ -298,7 +304,9 @@ cups_globals_alloc(void)
 		*xdg_config_home = getenv("XDG_CONFIG_HOME");
 					// Environment variables
 #  endif // !__APPLE__
-#  ifdef HAVE_GETEUID
+#  if defined(HAVE_SYS_AUXV_H) && defined(AT_SECURE)
+  if (getauxval(AT_SECURE))
+#  elif defined(HAVE_GETEUID)
   if ((geteuid() != getuid() && getuid()) || getegid() != getgid())
 #  else
   if (!getuid())
@@ -314,6 +322,8 @@ cups_globals_alloc(void)
     cg->sysconfig       = CUPS_SERVERROOT;
     cg->cups_statedir   = CUPS_STATEDIR;
     cg->localedir       = CUPS_LOCALEDIR;
+
+    cups_userconfig = NULL;
   }
   else
   {
@@ -327,8 +337,11 @@ cups_globals_alloc(void)
     if ((cg->cups_serverbin = getenv("CUPS_SERVERBIN")) == NULL)
       cg->cups_serverbin = CUPS_SERVERBIN;
 
-    if ((cg->sysconfig = getenv("CUPS_SERVERROOT")) == NULL)
-      cg->sysconfig = CUPS_SERVERROOT;
+    if ((cg->sysconfig = getenv("CUPS_SYSCONFIG")) == NULL)
+    {
+      if ((cg->sysconfig = getenv("CUPS_SERVERROOT")) == NULL)
+	cg->sysconfig = CUPS_SERVERROOT;
+    }
 
     if ((cg->cups_statedir = getenv("CUPS_STATEDIR")) == NULL)
       cg->cups_statedir = CUPS_STATEDIR;
@@ -337,12 +350,25 @@ cups_globals_alloc(void)
       cg->localedir = CUPS_LOCALEDIR;
   }
 
+  if (!getuid())
+  {
+    // When running as root, make "userconfig" the same as "sysconfig"...
+    cg->userconfig = strdup(cg->sysconfig);
+    return (cg);
+  }
+  else if (cups_userconfig)
+  {
+    // Use the value of the CUPS_USERCONFIG environment variable...
+    cg->userconfig = strdup(cups_userconfig);
+    return (cg);
+  }
+
+  // Find the user configuration directory relative to the home directory...
 #  ifdef __APPLE__
   if (!home)
 #else
   if (!home && !xdg_config_home)
 #  endif // __APPLE__
-  if (!home)
   {
     struct passwd	pw;		/* User info */
     struct passwd	*result;	/* Auxiliary pointer */
@@ -412,10 +438,6 @@ cups_globals_free(_cups_globals_t *cg)	/* I - Pointer to global data */
 			*next;		/* Next buffer */
 
 
-#ifdef DEBUG
-  fprintf(stderr, "T%d cups_globals_free\n", cg->thread_id);
-#endif // DEBUG
-
   if (cg->last_status_message)
     _cupsStrFree(cg->last_status_message);
 
@@ -437,11 +459,18 @@ cups_globals_free(_cups_globals_t *cg)	/* I - Pointer to global data */
   cupsFileClose(cg->stdio_files[1]);
   cupsFileClose(cg->stdio_files[2]);
 
+  cupsArrayDelete(cg->browse_domains);
+  cupsArrayDelete(cg->filter_location_array);
+  if (cg->filter_location_regex)
+  {
+    regfree(cg->filter_location_regex);
+    free(cg->filter_location_regex);
+  }
+
   cupsFreeOptions(cg->cupsd_num_settings, cg->cupsd_settings);
 
   free(cg->userconfig);
   free(cg->raster_error.start);
-
   free(cg);
 }
 #endif /* HAVE_PTHREAD_H || _WIN32 */

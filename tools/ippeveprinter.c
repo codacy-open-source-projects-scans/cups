@@ -1,7 +1,7 @@
 //
 // IPP Everywhere printer application for CUPS.
 //
-// Copyright © 2020-2024 by OpenPrinting.
+// Copyright © 2020-2025 by OpenPrinting.
 // Copyright © 2020 by the IEEE-ISTO Printer Working Group.
 // Copyright © 2010-2021 by Apple Inc.
 //
@@ -2070,7 +2070,6 @@ finish_document_data(
   if ((job->fd = create_job_file(job, filename, sizeof(filename), client->printer->directory, NULL)) < 0)
   {
     respond_ipp(client, IPP_STATUS_ERROR_INTERNAL, "Unable to create print file: %s", strerror(errno));
-
     goto abort_job;
   }
 
@@ -2081,43 +2080,23 @@ finish_document_data(
   {
     if (write(job->fd, buffer, (size_t)bytes) < bytes)
     {
-      int error = errno;		// Write error
-
-      close(job->fd);
-      job->fd = -1;
-
-      unlink(filename);
-
-      respond_ipp(client, IPP_STATUS_ERROR_INTERNAL, "Unable to write print file: %s", strerror(error));
-
-      goto abort_job;
+      respond_ipp(client, IPP_STATUS_ERROR_INTERNAL, "Unable to write print file: %s", strerror(errno));
+      goto cleanup_and_abort;
     }
   }
 
   if (bytes < 0)
   {
-    // Got an error while reading the print data, so abort this job.
-    close(job->fd);
-    job->fd = -1;
-
-    unlink(filename);
-
     respond_ipp(client, IPP_STATUS_ERROR_INTERNAL, "Unable to read print file.");
-
-    goto abort_job;
+    goto cleanup_and_abort;
   }
 
+  // Close the file descriptor
   if (close(job->fd))
   {
-    int error = errno;			// Write error
-
     job->fd = -1;
-
-    unlink(filename);
-
-    respond_ipp(client, IPP_STATUS_ERROR_INTERNAL, "Unable to write print file: %s", strerror(error));
-
-    goto abort_job;
+    respond_ipp(client, IPP_STATUS_ERROR_INTERNAL, "Unable to close print file: %s", strerror(errno));
+    goto cleanup_and_abort;
   }
 
   job->fd       = -1;
@@ -2150,6 +2129,17 @@ finish_document_data(
   copy_job_attributes(client, job, ra);
   cupsArrayDelete(ra);
   return;
+
+  // Cleanup file on error, then abort job...
+  cleanup_and_abort:
+
+  if (job->fd >= 0)
+  {
+    close(job->fd);
+    job->fd = -1;
+  }
+
+  unlink(filename);
 
   // If we get here we had to abort the job...
   abort_job:
@@ -4708,6 +4698,8 @@ process_client(ippeve_client_t *client)	// I - Client
 
       if (recv(httpGetFd(client->http), buf, 1, MSG_PEEK) == 1 && (!buf[0] || !strchr("DGHOPT", buf[0])))
       {
+        char	security[256];		// Security description
+
         fprintf(stderr, "%s Starting HTTPS session.\n", client->hostname);
 
 	if (!httpSetEncryption(client->http, HTTP_ENCRYPTION_ALWAYS))
@@ -4716,7 +4708,7 @@ process_client(ippeve_client_t *client)	// I - Client
 	  break;
         }
 
-        fprintf(stderr, "%s Connection now encrypted.\n", client->hostname);
+	fprintf(stderr, "%s Connection now encrypted (%s).\n", client->hostname, httpGetSecurity(client->http, security, sizeof(security)));
       }
 
       first_time = false;
@@ -4853,6 +4845,8 @@ process_http(ippeve_client_t *client)	// I - Client connection
   {
     if (strstr(httpGetField(client->http, HTTP_FIELD_UPGRADE), "TLS/") != NULL && !httpIsEncrypted(client->http))
     {
+      char	security[256];		// Security description
+
       if (!respond_http(client, HTTP_STATUS_SWITCHING_PROTOCOLS, NULL, NULL, 0))
         return (0);
 
@@ -4864,7 +4858,7 @@ process_http(ippeve_client_t *client)	// I - Client connection
 	return (0);
       }
 
-      fprintf(stderr, "%s Connection now encrypted.\n", client->hostname);
+      fprintf(stderr, "%s Connection now encrypted (%s).\n", client->hostname, httpGetSecurity(client->http, security, sizeof(security)));
     }
     else if (!respond_http(client, HTTP_STATUS_NOT_IMPLEMENTED, NULL, NULL, 0))
       return (0);

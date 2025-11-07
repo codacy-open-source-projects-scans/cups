@@ -7,8 +7,8 @@ Changes in CUPS v2.5b1 (YYYY-MM-DD)
 - Added multiple language support for IPP Everywhere.
 - Added `cupsConcatString`, `cupsCopyString`, and `cupsFormatString` string
   APIs.
-- Added new `cupsRasterInitHeader` API.
-- Added `httpConnectURI` API.
+- Added `cupsRasterInitHeader` API.
+- Added `httpConnectURI`, `httpGetCookieValue`, and `httpGetSecurity` APIs.
 - Added `ippAddCredentialsString`, `ippGetFirstAttribute`,
   `ippGetNextAttribute`, `ippRestore`, and `ippSave` APIs.
 - Added new DNS-SD APIs.
@@ -32,10 +32,20 @@ Changes in CUPS v2.5b1 (YYYY-MM-DD)
 - Added a systemd slice to the systemd services included with the scheduler
 - Added localizations for deprecated IPP attributes/options (Issue #1020)
 - Added support for specifying permissions with the `cupsFileOpen` API.
-- Added new `cupsGetClock` API.
-- Added new `cupsParseOptions2` API with "end" argument.
-- Updated documentation (Issue #984, Issue #1086)
+- Added `cupsGetClock` API.
+- Added `cupsParseOptions2` API with "end" argument.
+- Added `cups-oauth` and `cups-x509` utilities (Issue #1184)
+- Added `DNSSDComputerName` directive to "cupsd.conf" and updated cupsd to
+  correctly update the mDNS hostname only if the `DNSSDHostName` directive is
+  not specified (Issue #1217)
+- Added `print-as-raster` printer and job attributes for forcing rasterization
+  (Issue #1282)
+- Added an "install" sub-command to the `cups-x509` command (Issue #1227)
+- Added a "--user-agent" option to the `ipptool` command.
+- Updated documentation (Issue #984, Issue #1086, Issue #1182)
+- Updated translations (Issue #1146, Issue #1161, Issue #1164)
 - Updated the configure script to default to installing to /usr/local.
+- Updated CUPS to use the Windows mDNS APIs.
 - Updated CUPS to require TLS support - OpenSSL, GNUTLS and LibreSSL are
   supported.
 - Updated CUPS to require ZLIB.
@@ -66,7 +76,16 @@ Changes in CUPS v2.5b1 (YYYY-MM-DD)
   `cupsRasterGetErrorString`.
 - Updated the `ipptool` utility to support the `--bearer-token` and
   `--client-name` options.
+- Updated `cupsEnumDests` and `cupsGetDests` to support printer browsing and
+  filtering options in client.conf (Issue #1180)
+- Updated the CUPS web interface to make administrative tasks more discoverable
+  (Issue #1207)
+- Updated the `httpSetCookie` API to support multiple "Set-Cookie:" header
+  values.
+- Updated the setuid/gid checks in libcups to use `getauxval` on Linux to avoid
+  potential security issues (Issue #1258)
 - Deprecated the "page-border" Job Template attribute (Issue #1020)
+- Removed the `cups-config` utility (use `pkg-config` instead)
 - Fixed use-after-free in `cupsdAcceptClient()` when we log warning during error
   handling (fixes CVE-2023-34241)
 - Fixed hanging of `lpstat` on Solaris (Issue #156)
@@ -127,6 +146,14 @@ Changes in CUPS v2.5b1 (YYYY-MM-DD)
 - Fixed error handling when reading a mixed `1setOf` attribute.
 - Fixed how `ippeveprinter` responds to an unsupported request character set.
 - Fixed a recursion issue in `ippReadIO`.
+- Fixed verbose listing of `lpstat -l -e` when permanent queue has the same name
+  as network discovered (Issue #1120)
+- Fixed validation of dateTime values with time zones more than UTC+11
+  (Issue #1201)
+- Fixed job cleanup after daemon restart (Issue #1315)
+- Fixed unreachable block in IPP backend (Issue #1351)
+- Fixed memory leak in _cupsConvertOptions (Issue #1354)
+- Fixed missing write check in `cupsFileOpen/Fd` (Issue #1360)
 - Removed hash support for SHA2-512-224 and SHA2-512-256.
 - Removed `mantohtml` script for generating html pages (use
   `https://www.msweet.org/mantohtml/`)

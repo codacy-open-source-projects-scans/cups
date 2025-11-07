@@ -1,7 +1,7 @@
 /*
  * Configuration routines for the CUPS scheduler.
  *
- * Copyright © 2020-2024 by OpenPrinting.
+ * Copyright © 2020-2025 by OpenPrinting.
  * Copyright © 2007-2018 by Apple Inc.
  * Copyright © 1997-2007 by Easy Software Products, all rights reserved.
  *
@@ -9,11 +9,8 @@
  * information.
  */
 
-/*
- * Include necessary headers...
- */
-
 #include "cupsd.h"
+#include <cups/oauth.h>
 #include <stdarg.h>
 #include <grp.h>
 #include <sys/utsname.h>
@@ -79,6 +76,7 @@ static const cupsd_var_t	cupsd_vars[] =
   { "DefaultPolicy",		&DefaultPolicy,		CUPSD_VARTYPE_STRING },
   { "DefaultShared",		&DefaultShared,		CUPSD_VARTYPE_BOOLEAN },
   { "DirtyCleanInterval",	&DirtyCleanInterval,	CUPSD_VARTYPE_TIME },
+  { "DNSSDComputerName",	&DNSSDComputerName,	CUPSD_VARTYPE_STRING },
   { "DNSSDHostName",		&DNSSDHostName,		CUPSD_VARTYPE_STRING },
   { "ErrorPolicy",		&ErrorPolicy,		CUPSD_VARTYPE_STRING },
   { "FilterLimit",		&FilterLimit,		CUPSD_VARTYPE_INTEGER },
@@ -138,6 +136,8 @@ static const cupsd_var_t	cupsfiles_vars[] =
   { "ErrorLog",			&ErrorLog,		CUPSD_VARTYPE_STRING },
   { "FileDevice",		&FileDevice,		CUPSD_VARTYPE_BOOLEAN },
   { "LogFilePerm",		&LogFilePerm,		CUPSD_VARTYPE_PERM },
+  { "OAuthScopes",		&OAuthScopes,		CUPSD_VARTYPE_STRING },
+  { "OAuthServer",		&OAuthServer,		CUPSD_VARTYPE_STRING },
   { "PageLog",			&PageLog,		CUPSD_VARTYPE_STRING },
   { "Printcap",			&Printcap,		CUPSD_VARTYPE_STRING },
   { "RemoteRoot",		&RemoteRoot,		CUPSD_VARTYPE_STRING },
@@ -383,10 +383,10 @@ cupsdCheckPermissions(
 /*
  * 'cupsdDefaultAuthType()' - Get the default AuthType.
  *
- * When the default_auth_type is "auto", this function tries to get the GSS
- * credentials for the server.  If that succeeds we use Kerberos authentication,
- * otherwise we do a fallback to Basic authentication against the local user
- * accounts.
+ * When the default_auth_type is "auto", this function uses OAuth if the
+ * OAuthServer directive has been specified or Kerberos if we can get GSS
+ * credentials for the server.  Otherwise we fallback to Basic authentication
+ * against the local user accounts.
  */
 
 int					/* O - Default AuthType value */
@@ -408,6 +408,13 @@ cupsdDefaultAuthType(void)
 
   if (default_auth_type != CUPSD_AUTH_AUTO)
     return (default_auth_type);
+
+ /*
+  * If the OAuthServer is set, use that...
+  */
+
+  if (OAuthServer)
+    return (default_auth_type = CUPSD_AUTH_BEARER);
 
 #ifdef HAVE_GSSAPI
 #  ifdef __APPLE__
@@ -593,6 +600,18 @@ cupsdReadConfiguration(void)
                   CUPS_VERSION_MINOR);
   cupsdSetString(&StateDir, CUPS_STATEDIR);
 
+  cupsdClearString(&OAuthScopes);
+  cupsdClearString(&OAuthServer);
+
+  cupsArrayDelete(OAuthGroups);
+  OAuthGroups = NULL;
+
+  cupsJSONDelete(OAuthJWKS);
+  OAuthJWKS = NULL;
+
+  cupsJSONDelete(OAuthMetadata);
+  OAuthMetadata = NULL;
+
   if (!strcmp(CUPS_DEFAULT_PRINTCAP, "/etc/printers.conf"))
     PrintcapFormat = PRINTCAP_SOLARIS;
   else if (!strcmp(CUPS_DEFAULT_PRINTCAP,
@@ -757,8 +776,9 @@ cupsdReadConfiguration(void)
   Browsing                 = CUPS_DEFAULT_BROWSING;
   DefaultShared            = CUPS_DEFAULT_DEFAULT_SHARED;
 
-  cupsdSetString(&DNSSDSubTypes, "_cups,_print,_universal");
+  cupsdClearString(&DNSSDComputerName);
   cupsdClearString(&DNSSDHostName);
+  cupsdSetString(&DNSSDSubTypes, "_cups,_print,_universal");
 
   cupsdSetString(&ErrorPolicy, CUPS_DEFAULT_ERROR_POLICY);
 
@@ -852,6 +872,22 @@ cupsdReadConfiguration(void)
 
   cupsFileClose(fp);
 
+  if (OAuthServer)
+  {
+    if ((OAuthMetadata = cupsOAuthGetMetadata(OAuthServer)) == NULL)
+    {
+      cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to get metadata from OAUth server \"%s\": %s", OAuthServer, cupsGetErrorString());
+      if (FatalErrors & CUPSD_FATAL_CONFIG)
+        status = 0;
+    }
+    else if ((OAuthJWKS = cupsOAuthGetJWKS(OAuthServer, OAuthMetadata)) == NULL)
+    {
+      cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to load OAuth JWKS for validation: %s", cupsGetErrorString());
+      if (FatalErrors & CUPSD_FATAL_CONFIG)
+        status = 0;
+    }
+  }
+
   if (!status)
   {
     if (TestConfigFile)
@@ -865,6 +901,12 @@ cupsdReadConfiguration(void)
 
     return (0);
   }
+
+  DNSSDComputerNameConfigured = DNSSDComputerName != NULL;
+  DNSSDHostNameConfigured     = DNSSDHostName != NULL;
+
+  if (DNSSDComputerName && (!*DNSSDComputerName || !strcmp(DNSSDComputerName, "none")))
+    cupsdClearString(&DNSSDComputerName);
 
   RunUser = getuid();
 
@@ -945,6 +987,17 @@ cupsdReadConfiguration(void)
   for (slash = ServerName; isdigit(*slash & 255) || *slash == '.'; slash ++);
 
   ServerNameIsIP = !*slash;
+
+ /*
+  * If the ErrorLog value contains "%s", close the current log file (if any)
+  * so that the proper ServerName value is used when logging.
+  */
+
+  if (ErrorLog && strstr(ErrorLog, "%s") && ErrorFile && ErrorFile != LogStderr)
+  {
+    cupsFileClose(ErrorFile);
+    ErrorFile = NULL;
+  }
 
  /*
   * Make sure ServerAdmin is initialized...
@@ -2328,6 +2381,13 @@ parse_aaa(cupsd_location_t *loc,	/* I - Location */
       if (loc->level == CUPSD_AUTH_ANON)
 	loc->level = CUPSD_AUTH_USER;
     }
+    else if (!_cups_strcasecmp(value, "bearer"))
+    {
+      loc->type = CUPSD_AUTH_BEARER;
+
+      if (loc->level == CUPSD_AUTH_ANON)
+	loc->level = CUPSD_AUTH_USER;
+    }
     else if (!_cups_strcasecmp(value, "default"))
     {
       loc->type = CUPSD_AUTH_DEFAULT;
@@ -3128,6 +3188,8 @@ read_cupsd_conf(cups_file_t *fp)	/* I - File to read from */
 	    min_version = _HTTP_TLS_1_3;
 	  else if (!_cups_strcasecmp(start, "None"))
 	    options = _HTTP_TLS_NONE;
+	  else if (!_cups_strcasecmp(start, "NoSystem"))
+	    options |= _HTTP_TLS_NO_SYSTEM;
 	  else if (_cups_strcasecmp(start, "NoEmptyFragments"))
 	    cupsdLogMessage(CUPSD_LOG_WARN, "Unknown SSL option %s at line %d.", start, linenum);
         }
@@ -3283,6 +3345,8 @@ read_cupsd_conf(cups_file_t *fp)	/* I - File to read from */
 	default_auth_type = CUPSD_AUTH_NONE;
       else if (!_cups_strcasecmp(value, "basic"))
 	default_auth_type = CUPSD_AUTH_BASIC;
+      else if (!_cups_strcasecmp(value, "bearer"))
+	default_auth_type = CUPSD_AUTH_BEARER;
       else if (!_cups_strcasecmp(value, "negotiate"))
         default_auth_type = CUPSD_AUTH_NEGOTIATE;
       else if (!_cups_strcasecmp(value, "auto"))
@@ -3637,6 +3701,43 @@ read_cups_files_conf(cups_file_t *fp)	/* I - File to read from */
 	  if (FatalErrors & CUPSD_FATAL_CONFIG)
 	    return (0);
 	}
+      }
+    }
+    else if (!_cups_strcasecmp(line, "OAuthGroup") && value)
+    {
+     /*
+      * OAuthGroup NAME FILENAME
+      */
+
+      char	temp[1024],			/* Temporary filename */
+		*filename;			/* Filename on line */
+
+      for (filename = value; *filename; filename ++)
+      {
+        if (isspace(*filename & 255))
+          break;
+      }
+
+      while (*filename && isspace(*filename & 255))
+        *filename++ = '\0';
+
+      if (*filename != '/')
+      {
+        // Convert relative filename to CUPS_SERVERROOT/filename
+        snprintf(temp, sizeof(temp), "%s/%s", ServerRoot, filename);
+        filename = temp;
+      }
+
+      if (*filename && !access(filename, R_OK))
+      {
+        if (!cupsdAddOAuthGroup(value, filename) && (FatalErrors & CUPSD_FATAL_CONFIG))
+          return (0);
+      }
+      else
+      {
+        cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to read OAuthGroup file \"%s\" on line %d of %s: %s", filename, linenum, CupsFilesFile, strerror(errno));
+        if (FatalErrors & CUPSD_FATAL_CONFIG)
+	  return (0);
       }
     }
     else if (!_cups_strcasecmp(line, "PassEnv") && value)

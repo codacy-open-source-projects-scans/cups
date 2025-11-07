@@ -3,7 +3,7 @@
 //
 // Note: This file is included from tls.c
 //
-// Copyright © 2020-2024 by OpenPrinting
+// Copyright © 2020-2025 by OpenPrinting
 // Copyright © 2007-2019 by Apple Inc.
 // Copyright © 1997-2007 by Easy Software Products, all rights reserved.
 //
@@ -205,7 +205,7 @@ cupsCreateCredentials(
   if (!path)
     path = http_default_path(defpath, sizeof(defpath));
 
-  if (!path || !common_name)
+  if (!path || !common_name || !*common_name)
   {
     _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), 0);
     goto done;
@@ -561,7 +561,7 @@ cupsCreateCredentialsRequest(
   if (!path)
     path = http_default_path(defpath, sizeof(defpath));
 
-  if (!path || !common_name)
+  if (!path || !common_name || !*common_name)
   {
     _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), 0);
     goto done;
@@ -901,7 +901,7 @@ cupsGetCredentialsTrust(
     return (HTTP_TRUST_UNKNOWN);
   }
 
-  if (cg->any_root < 0)
+  if (!cg->client_conf_loaded)
   {
     _cupsSetDefaults();
     gnutls_load_crl();
@@ -1005,7 +1005,7 @@ cupsGetCredentialsTrust(
     time_t	curtime;		// Current date/time
 
     time(&curtime);
-    if (curtime < gnutls_x509_crt_get_activation_time(certs[0]) || curtime > gnutls_x509_crt_get_expiration_time(certs[0]))
+    if ((curtime + 86400) < gnutls_x509_crt_get_activation_time(certs[0]) || curtime > gnutls_x509_crt_get_expiration_time(certs[0]))
     {
       _cupsSetError(IPP_STATUS_ERROR_CUPS_PKI, _("Credentials have expired."), 1);
       trust = HTTP_TRUST_EXPIRED;
@@ -1521,6 +1521,62 @@ _httpFreeCredentials(
 
 
 //
+// 'httpGetSecurity()' - Get the TLS version and cipher suite used by a connection.
+//
+// This function gets the TLS version and cipher suite being used by a
+// connection, if any.  The string is copied to "buffer" and is of the form
+// "TLS/major.minor CipherSuite".  If not encrypted, the buffer is cleared to
+// the empty string.
+//
+// @since CUPS 2.5@
+//
+
+const char *				// O - Security information or `NULL` if not encrypted
+httpGetSecurity(http_t *http,		// I - HTTP connection
+                char   *buffer,		// I - String buffer
+                size_t bufsize)		// I - Size of buffer
+{
+  const char	*cipherName;		// Cipher suite name
+
+
+  // Range check input...
+  if (buffer)
+    *buffer = '\0';
+
+  if (!http || !http->tls || !buffer || bufsize < 16)
+    return (NULL);
+
+  // Record the TLS version and cipher suite...
+  cipherName = gnutls_session_get_desc(http->tls);
+
+  switch (gnutls_protocol_get_version(http->tls))
+  {
+    default :
+        snprintf(buffer, bufsize, "TLS/?.? %s", cipherName);
+        break;
+
+    case GNUTLS_TLS1_0 :
+        snprintf(buffer, bufsize, "TLS/1.0 %s", cipherName);
+        break;
+
+    case GNUTLS_TLS1_1 :
+        snprintf(buffer, bufsize, "TLS/1.1 %s", cipherName);
+        break;
+
+    case GNUTLS_TLS1_2 :
+        snprintf(buffer, bufsize, "TLS/1.2 %s", cipherName);
+        break;
+
+    case GNUTLS_TLS1_3 :
+        snprintf(buffer, bufsize, "TLS/1.3 %s", cipherName);
+        break;
+  }
+
+  return (buffer);
+}
+
+
+//
 // '_httpTLSInitialize()' - Initialize the TLS stack.
 //
 
@@ -1616,7 +1672,7 @@ _httpTLSStart(http_t *http)		// I - Connection to server
 
   DEBUG_printf("3_httpTLSStart(http=%p)", http);
 
-  if (tls_options < 0)
+  if (!cg->client_conf_loaded)
   {
     DEBUG_puts("4_httpTLSStart: Setting defaults.");
     _cupsSetDefaults();
@@ -1682,47 +1738,57 @@ _httpTLSStart(http_t *http)		// I - Connection to server
     // Server: get certificate and private key...
     char	crtfile[1024],		// Certificate file
 		keyfile[1024];		// Private key file
-    const char	*cn,			// Common name to lookup
+    const char	*cn = NULL,		// Common name to lookup
 		*cnptr;			// Pointer into common name
     bool	have_creds = false;	// Have credentials?
 
-    if (http->fields[HTTP_FIELD_HOST])
-    {
-      // Use hostname for TLS upgrade...
-      cupsCopyString(hostname, http->fields[HTTP_FIELD_HOST], sizeof(hostname));
-    }
-    else
-    {
-      // Resolve hostname from connection address...
-      http_addr_t	addr;		// Connection address
-      socklen_t		addrlen;	// Length of address
+    cupsMutexLock(&tls_mutex);
 
-      addrlen = sizeof(addr);
-      if (getsockname(http->fd, (struct sockaddr *)&addr, &addrlen))
+    if (!tls_common_name)
+    {
+      cupsMutexUnlock(&tls_mutex);
+
+      if (http->fields[HTTP_FIELD_HOST])
       {
-	DEBUG_printf("4_httpTLSStart: Unable to get socket address: %s", strerror(errno));
-	hostname[0] = '\0';
-      }
-      else if (httpAddrIsLocalhost(&addr))
-      {
-	hostname[0] = '\0';
+	// Use hostname for TLS upgrade...
+	cupsCopyString(hostname, http->fields[HTTP_FIELD_HOST], sizeof(hostname));
       }
       else
       {
-	httpAddrLookup(&addr, hostname, sizeof(hostname));
-        DEBUG_printf("4_httpTLSStart: Resolved socket address to \"%s\".", hostname);
+	// Resolve hostname from connection address...
+	http_addr_t	addr;		// Connection address
+	socklen_t	addrlen;	// Length of address
+
+	addrlen = sizeof(addr);
+	if (getsockname(http->fd, (struct sockaddr *)&addr, &addrlen))
+	{
+	  DEBUG_printf("4_httpTLSStart: Unable to get socket address: %s", strerror(errno));
+	  hostname[0] = '\0';
+	}
+	else if (httpAddrIsLocalhost(&addr))
+	{
+	  hostname[0] = '\0';
+	}
+	else
+	{
+	  httpAddrLookup(&addr, hostname, sizeof(hostname));
+	  DEBUG_printf("4_httpTLSStart: Resolved socket address to \"%s\".", hostname);
+	}
       }
+
+      if (isdigit(hostname[0] & 255) || hostname[0] == '[')
+	hostname[0] = '\0';		// Don't allow numeric addresses
+
+      if (hostname[0])
+        cn = hostname;
+
+      cupsMutexLock(&tls_mutex);
     }
 
-    if (isdigit(hostname[0] & 255) || hostname[0] == '[')
-      hostname[0] = '\0';		// Don't allow numeric addresses
-
-    cupsMutexLock(&tls_mutex);
-
-    if (hostname[0])
-      cn = hostname;
-    else
+    if (!cn)
       cn = tls_common_name;
+
+    DEBUG_printf("4_httpTLSStart: Using common name \"%s\"...", cn);
 
     if (cn)
     {
@@ -1769,7 +1835,6 @@ _httpTLSStart(http_t *http)		// I - Connection to server
 	DEBUG_puts("4_httpTLSStart: cupsCreateCredentials failed.");
 	http->error  = errno = EINVAL;
 	http->status = HTTP_STATUS_ERROR;
-	_cupsSetError(IPP_STATUS_ERROR_INTERNAL, _("Unable to create server credentials."), 1);
 	cupsMutexUnlock(&tls_mutex);
 
 	return (false);
@@ -1813,7 +1878,12 @@ _httpTLSStart(http_t *http)		// I - Connection to server
     return (false);
   }
 
-  cupsCopyString(priority_string, "@SYSTEM,NORMAL", sizeof(priority_string));
+  if (tls_options & _HTTP_TLS_NO_SYSTEM)
+    priority_string[0] = '\0';
+  else
+    cupsCopyString(priority_string, "@SYSTEM,", sizeof(priority_string));
+
+  cupsConcatString(priority_string, "NORMAL", sizeof(priority_string));
 
   if (tls_max_version < _HTTP_TLS_MAX)
   {
@@ -1921,7 +1991,7 @@ _httpTLSStop(http_t *http)		// I - Connection to server
   int	error;				// Error code
 
 
-  error = gnutls_bye(http->tls, http->mode == _HTTP_MODE_CLIENT ? GNUTLS_SHUT_RDWR : GNUTLS_SHUT_WR);
+  error = gnutls_bye(http->tls, GNUTLS_SHUT_WR);
   if (error != GNUTLS_E_SUCCESS)
     _cupsSetError(IPP_STATUS_ERROR_INTERNAL, gnutls_strerror(errno), 0);
 

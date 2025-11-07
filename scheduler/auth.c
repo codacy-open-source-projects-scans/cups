@@ -1,7 +1,7 @@
 /*
  * Authorization routines for the CUPS scheduler.
  *
- * Copyright © 2020-2024 by OpenPrinting.
+ * Copyright © 2020-2025 by OpenPrinting.
  * Copyright © 2007-2019 by Apple Inc.
  * Copyright © 1997-2007 by Easy Software Products, all rights reserved.
  *
@@ -10,10 +10,6 @@
  *
  * Licensed under Apache License v2.0.  See the file "LICENSE" for more
  * information.
- */
-
-/*
- * Include necessary headers...
  */
 
 #include "cupsd.h"
@@ -63,11 +59,12 @@ static int		check_admin_access(cupsd_client_t *con);
 #ifdef HAVE_AUTHORIZATION_H
 static int		check_authref(cupsd_client_t *con, const char *right);
 #endif /* HAVE_AUTHORIZATION_H */
-static int		compare_locations(cupsd_location_t *a,
-																cupsd_location_t *b,
-																void *data);
+static int		compare_locations(cupsd_location_t *a, cupsd_location_t *b, void *data);
+static int		compare_ogroups(cupsd_ogroup_t *a, cupsd_ogroup_t *b, void *data);
 static cupsd_authmask_t	*copy_authmask(cupsd_authmask_t *am, void *data);
 static void		free_authmask(cupsd_authmask_t *am, void *data);
+static void		free_ogroup(cupsd_ogroup_t *og, void *data);
+static int		load_ogroup(cupsd_ogroup_t *og, struct stat *fileinfo);
 #if HAVE_LIBPAM
 static int		pam_func(int, const struct pam_message **,
 			         struct pam_response **, void *);
@@ -245,6 +242,72 @@ cupsdAddNameMask(cups_array_t **masks,	/* IO - Masks array (created as needed) *
 
 
 /*
+ * 'cupsdAddOAuthGroup()' - Add an OAuth group file.
+ */
+
+int					/* O - 1 on success, 0 on error */
+cupsdAddOAuthGroup(const char *name,	/* I - Group name */
+                   const char *filename)/* I - Group filename */
+{
+  cupsd_ogroup_t	*og;		/* Group */
+  struct stat		fileinfo;	/* File information */
+
+
+ /*
+  * Check OAuth group file...
+  */
+
+  if (stat(filename, &fileinfo))
+  {
+    cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to access OAuthGroup %s file \"%s\": %s", name, filename, strerror(errno));
+    return (0);
+  }
+
+ /*
+  * Create the new group...
+  */
+
+  if (!OAuthGroups)
+  {
+   /*
+    * Create groups array...
+    */
+
+    if ((OAuthGroups = cupsArrayNew3((cups_array_cb_t)compare_ogroups, /*d*/NULL, /*h*/NULL, /*hsize*/0, /*cf*/NULL, (cups_afree_cb_t)free_ogroup)) == NULL)
+    {
+      cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to allocate memory for OAuthGroup array: %s", strerror(errno));
+      return (0);
+    }
+  }
+
+  if ((og = (cupsd_ogroup_t *)calloc(1, sizeof(cupsd_ogroup_t))) == NULL)
+  {
+    cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to allocate memory for OAuthGroup %s: %s", name, strerror(errno));
+    return (0);
+  }
+
+  if ((og->name = strdup(name)) == NULL || (og->filename = strdup(filename)) == NULL)
+  {
+    cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to allocate memory for OAuthGroup %s: %s", name, strerror(errno));
+    free_ogroup(og, NULL);
+    return (0);
+  }
+
+ /*
+  * Add the group to the array...
+  */
+
+  cupsArrayAdd(OAuthGroups, og);
+
+ /*
+  * Load the group and return...
+  */
+
+  return (load_ogroup(og, &fileinfo));
+}
+
+
+/*
  * 'cupsdAuthorize()' - Validate any authorization credentials.
  */
 
@@ -254,6 +317,7 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
   int		type;			/* Authentication type */
   const char	*authorization;		/* Pointer into Authorization string */
   char		*ptr,			/* Pointer into string */
+		bearer[4096],		/* CUPS_BEARER cookie string */
 		username[HTTP_MAX_VALUE],
 					/* Username string */
 		password[HTTP_MAX_VALUE];
@@ -286,6 +350,11 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
   */
 
   authorization = httpGetField(con->http, HTTP_FIELD_AUTHORIZATION);
+
+  cupsdLogClient(con, CUPSD_LOG_DEBUG2, "cookie=\"%s\"", httpGetCookie(con->http));
+
+  if (!*authorization && httpGetCookieValue(con->http, "CUPS_BEARER", bearer, sizeof(bearer)) && bearer[0])
+    authorization = "Bearer COOKIE";
 
   username[0] = '\0';
   password[0] = '\0';
@@ -499,7 +568,7 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
 
     cupsdLogClient(con, CUPSD_LOG_DEBUG, "Authorized as %s using Local.", username);
   }
-  else if (!strncmp(authorization, "Basic", 5))
+  else if (!strncmp(authorization, "Basic ", 6))
   {
    /*
     * Get the Basic authentication data...
@@ -507,6 +576,15 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
 
     int	userlen;			/* Username:password length */
 
+   /*
+    * Only allow Basic if enabled...
+    */
+
+    if (type != CUPSD_AUTH_BASIC)
+    {
+      cupsdLogClient(con, CUPSD_LOG_ERROR, "Basic authentication is not enabled.");
+      return;
+    }
 
     authorization += 5;
     while (isspace(*authorization & 255))
@@ -553,7 +631,6 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
     * Validate the username and password...
     */
 
-    if (type == CUPSD_AUTH_BASIC)
     {
 #if HAVE_LIBPAM
      /*
@@ -565,7 +642,7 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
       int		pamerr;		/* PAM error code */
       struct pam_conv	pamdata;	/* PAM conversation data */
       cupsd_authdata_t	data;		/* Authentication data */
-
+      struct passwd	*userinfo;	/* User information */
 
       cupsCopyString(data.username, username, sizeof(data.username));
       cupsCopyString(data.password, password, sizeof(data.password));
@@ -623,6 +700,13 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
       }
 
       pam_end(pamh, PAM_SUCCESS);
+
+     /*
+      * Copy GECOS information, if available, to get the user's real name...
+      */
+
+      if ((userinfo = getpwnam(username)) != NULL && userinfo->pw_gecos)
+        cupsCopyString(con->realname, userinfo->pw_gecos, sizeof(con->realname));
 #else
       cupsdLogClient(con, CUPSD_LOG_ERROR, "No authentication support is available.");
       return;
@@ -632,8 +716,66 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
     cupsdLogClient(con, CUPSD_LOG_DEBUG, "Authorized as \"%s\" using Basic.", username);
     con->type = type;
   }
+  else if (!strncmp(authorization, "Bearer ", 7))
+  {
+    // OAuth/OpenID authorization using JWT bearer tokens...
+    cups_jwt_t	*jwt;			// JWT user information
+    const char	*sub,			// Subject/user ID
+		*name,			// Real name
+		*email;			// Email address
+
+   /*
+    * Only allow OAuth if enabled...
+    */
+
+    if (type != CUPSD_AUTH_BEARER)
+    {
+      cupsdLogClient(con, CUPSD_LOG_ERROR, "OAuth authentication is not enabled.");
+      return;
+    }
+
+    // Skip whitespace after "Bearer"...
+    authorization += 7;
+    while (isspace(*authorization & 255))
+      authorization ++;
+
+    if (!strcmp(authorization, "COOKIE"))
+      authorization = bearer;		// Use the cookie value for authorization
+
+    // Decode and validate the JWT...
+    if ((jwt = cupsOAuthGetUserId(OAuthServer, OAuthMetadata, authorization)) == NULL)
+    {
+      cupsdLogClient(con, CUPSD_LOG_ERROR, "Unable to get user information from bearer token: %s", cupsGetErrorString());
+      cupsCopyString(con->autherror, cupsGetErrorString(), sizeof(con->autherror));
+      return;
+    }
+    else if ((sub = cupsJWTGetClaimString(jwt, CUPS_JWT_SUB)) == NULL)
+    {
+      cupsdLogClient(con, CUPSD_LOG_ERROR, "Missing subject name in user information.");
+      cupsCopyString(con->autherror, "Missing subject name.", sizeof(con->autherror));
+      cupsJWTDelete(jwt);
+      return;
+    }
+
+    // Good JWT, grab information from it and return...
+    con->type         = CUPSD_AUTH_BEARER;
+    con->autherror[0] = '\0';
+    con->password[0]  = '\0';
+
+    httpSetAuthString(con->http, "Bearer", authorization);
+    cupsCopyString(con->username, sub, sizeof(con->username));
+    if ((name = cupsJWTGetClaimString(jwt, CUPS_JWT_NAME)) != NULL)
+      cupsCopyString(con->realname, name, sizeof(con->realname));
+    if ((email = cupsJWTGetClaimString(jwt, "email")) != NULL)
+      cupsCopyString(con->email, email, sizeof(con->email));
+
+    cupsJWTDelete(jwt);
+
+    cupsdLogClient(con, CUPSD_LOG_DEBUG, "Authorized as \"%s\" (%s <%s>) using OAuth/OpenID.", con->username, con->realname, con->email);
+    return;
+  }
 #ifdef HAVE_GSSAPI
-  else if (!strncmp(authorization, "Negotiate", 9))
+  else if (!strncmp(authorization, "Negotiate ", 10))
   {
     int			len;		/* Length of authorization string */
     gss_ctx_id_t	context;	/* Authorization context */
@@ -645,7 +787,17 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
 					/* Output token for username */
     gss_name_t		client_name;	/* Client name */
 
-#  ifdef __APPLE__
+   /*
+    * Only allow Kerberos if enabled...
+    */
+
+    if (type != CUPSD_AUTH_NEGOTIATE)
+    {
+      cupsdLogClient(con, CUPSD_LOG_ERROR, "Kerberos authentication is not enabled.");
+      return;
+    }
+
+#  ifdef __APPLE__DISABLED // Remove DISABLED if ever this code is used for macOS installer
    /*
     * If the weak-linked GSSAPI/Kerberos library is not present, don't try
     * to use it...
@@ -656,7 +808,7 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
       cupsdLogClient(con, CUPSD_LOG_WARN, "GSSAPI/Kerberos authentication failed because the Kerberos framework is not present.");
       return;
     }
-#  endif /* __APPLE__ */
+#  endif /* __APPLE__DISABLED */
 
    /*
     * Find the start of the Kerberos input token...
@@ -795,6 +947,10 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
   */
 
   cupsCopyString(con->username, username, sizeof(con->username));
+
+  if (!con->realname[0])
+    cupsCopyString(con->realname, username, sizeof(con->realname));
+
   cupsCopyString(con->password, password, sizeof(con->password));
 }
 
@@ -1424,6 +1580,33 @@ cupsdFindLocation(const char *location)	/* I - Connection */
 
 
 /*
+ * 'cupsdFindOAuthGroup()' - Find an OAuth group.
+ */
+
+cupsd_ogroup_t *			/* O - Group or `NULL` */
+cupsdFindOAuthGroup(const char *name)	/* I - Group name */
+{
+  cupsd_ogroup_t	key,		/* Search key */
+			*og;		/* Matching group */
+  struct stat		fileinfo;	/* Group file information */
+
+
+  key.name = (char *)name;
+  if ((og = (cupsd_ogroup_t *)cupsArrayFind(OAuthGroups, &key)) != NULL)
+  {
+   /*
+    * See if we need to reload the group file...
+    */
+
+    if (!stat(og->filename, &fileinfo) && (fileinfo.st_size != og->fileinfo.st_size || fileinfo.st_mtime > og->fileinfo.st_mtime))
+      load_ogroup(og, &fileinfo);
+  }
+
+  return (og);
+}
+
+
+/*
  * 'cupsdFreeLocation()' - Free all memory used by a location.
  */
 
@@ -1473,6 +1656,7 @@ cupsdIsAuthorized(cupsd_client_t *con,	/* I - Connection */
 		{
 		  "None",
 		  "Basic",
+		  "Bearer",
 		  "Negotiate"
 		};
 
@@ -1639,169 +1823,253 @@ cupsdIsAuthorized(cupsd_client_t *con,	/* I - Connection */
   * Strip any @domain or @KDC from the username and owner...
   */
 
-  if (StripUserDomain && (ptr = strchr(username, '@')) != NULL)
+  if (type != CUPSD_AUTH_BEARER && StripUserDomain && (ptr = strchr(username, '@')) != NULL)
     *ptr = '\0';
 
   if (owner)
   {
     cupsCopyString(ownername, owner, sizeof(ownername));
 
-    if (StripUserDomain && (ptr = strchr(ownername, '@')) != NULL)
+    if (type != CUPSD_AUTH_BEARER && StripUserDomain && (ptr = strchr(ownername, '@')) != NULL)
       *ptr = '\0';
   }
   else
     ownername[0] = '\0';
 
- /*
-  * Get the user info...
-  */
-
-  if (username[0])
+  if (type == CUPSD_AUTH_BEARER)
   {
-    pw = getpwnam(username);
-    endpwent();
+   /*
+    * Lookup access via OAuth groups...
+    */
+
+    cupsd_ogroup_t	*og;		// Current OAuth group
+
+    if (best->level == CUPSD_AUTH_USER)
+    {
+     /*
+      * If there are no names associated with this location, then any valid user
+      * is OK...
+      */
+
+      if (cupsArrayCount(best->names) == 0)
+	return (HTTP_STATUS_OK);
+
+     /*
+      * Otherwise check the user list and return OK if this user is allowed...
+      */
+
+      cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdIsAuthorized: Checking user membership...");
+
+      for (name = (char *)cupsArrayFirst(best->names); name; name = (char *)cupsArrayNext(best->names))
+      {
+	if (!_cups_strcasecmp(name, "@OWNER") && owner && !_cups_strcasecmp(username, ownername))
+	{
+	  // User is owner...
+	  return (HTTP_STATUS_OK);
+	}
+	else if (name[0] == '@')
+	{
+	  // Check OAuth group membership...
+	  if ((og = cupsdFindOAuthGroup(name + 1)) == NULL)
+	  {
+	    // Group not defined...
+	    cupsdLogMessage(CUPSD_LOG_ERROR, "Authorization policy requires undefined OAuth group \"%s\", ignoring.", name + 1);
+	  }
+	  else if (cupsArrayFind(og->members, username) || (con->email[0] && cupsArrayFind(og->members, con->email)))
+	  {
+	    // User is in group...
+	    return (HTTP_STATUS_OK);
+	  }
+	}
+	else if (!_cups_strcasecmp(username, name) || (con->email[0] && !_cups_strcasecmp(con->email, name)))
+	{
+	  return (HTTP_STATUS_OK);
+	}
+      }
+    }
+    else
+    {
+     /*
+      * Check to see if this user is in any of the named groups...
+      */
+
+      cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdIsAuthorized: Checking group membership...");
+
+     /*
+      * Check to see if this user is in any of the named groups...
+      */
+
+      for (name = (char *)cupsArrayFirst(best->names); name; name = (char *)cupsArrayNext(best->names))
+      {
+	cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdIsAuthorized: Checking group \"%s\" membership.", name);
+
+	if ((og = cupsdFindOAuthGroup(name)) == NULL)
+	{
+	  // Group not defined...
+	  cupsdLogMessage(CUPSD_LOG_ERROR, "Authorization policy requires undefined OAuth group \"%s\", ignoring.", name + 1);
+	}
+	else if (cupsArrayFind(og->members, username) || (con->email[0] && cupsArrayFind(og->members, con->email)))
+	{
+	  // User is in group...
+	  return (HTTP_STATUS_OK);
+	}
+      }
+    }
   }
   else
-    pw = NULL;
-
- /*
-  * For matching user and group memberships below we will first go
-  * through all names except @SYSTEM to authorize the task as
-  * non-administrative, like printing or deleting one's own job, if this
-  * fails we will check whether we can authorize via the special name
-  * @SYSTEM, as an administrative task, like creating a print queue or
-  * deleting someone else's job.
-  * Note that tasks are considered as administrative by the policies
-  * in cupsd.conf, when they require the user or group @SYSTEM.
-  * We do this separation because if the client is a Snap connecting via
-  * domain socket, we need to additionally check whether it plugs to us
-  * through the "cups-control" interface which allows administration and
-  * not through the "cups" interface which allows only printing.
-  */
-
-  if (best->level == CUPSD_AUTH_USER)
   {
    /*
-    * If there are no names associated with this location, then
-    * any valid user is OK...
+    * Get the (local) user info...
     */
 
-    if (cupsArrayCount(best->names) == 0)
-      return (HTTP_STATUS_OK);
+    if (username[0])
+    {
+      pw = getpwnam(username);
+      endpwent();
+    }
+    else
+      pw = NULL;
 
    /*
-    * Otherwise check the user list and return OK if this user is
-    * allowed...
+    * For matching user and group memberships below we will first go
+    * through all names except @SYSTEM to authorize the task as
+    * non-administrative, like printing or deleting one's own job, if this
+    * fails we will check whether we can authorize via the special name
+    * @SYSTEM, as an administrative task, like creating a print queue or
+    * deleting someone else's job.
+    *
+    * Note that tasks are considered as administrative by the policies
+    * in cupsd.conf, when they require the user or group @SYSTEM.
+    * We do this separation because if the client is a Snap connecting via
+    * domain socket, we need to additionally check whether it plugs to us
+    * through the "cups-control" interface which allows administration and
+    * not through the "cups" interface which allows only printing.
     */
 
-    cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdIsAuthorized: Checking user membership...");
+    if (best->level == CUPSD_AUTH_USER)
+    {
+     /*
+      * If there are no names associated with this location, then
+      * any valid user is OK...
+      */
+
+      if (cupsArrayCount(best->names) == 0)
+	return (HTTP_STATUS_OK);
+
+     /*
+      * Otherwise check the user list and return OK if this user is
+      * allowed...
+      */
+
+      cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdIsAuthorized: Checking user membership...");
 
 #ifdef HAVE_AUTHORIZATION_H
-   /*
-    * If an authorization reference was supplied it must match a right name...
-    */
+     /*
+      * If an authorization reference was supplied it must match a right name...
+      */
 
-    if (con->authref)
-    {
-      for (name = (char *)cupsArrayFirst(best->names);
-           name;
-	   name = (char *)cupsArrayNext(best->names))
+      if (con->authref)
       {
-	if (!_cups_strncasecmp(name, "@AUTHKEY(", 9) && check_authref(con, name + 9))
-	  return (HTTP_STATUS_OK);
-      }
+	for (name = (char *)cupsArrayFirst(best->names);
+	     name;
+	     name = (char *)cupsArrayNext(best->names))
+	{
+	  if (!_cups_strncasecmp(name, "@AUTHKEY(", 9) && check_authref(con, name + 9))
+	    return (HTTP_STATUS_OK);
+	}
 
-      for (name = (char *)cupsArrayFirst(best->names);
-           name;
-	   name = (char *)cupsArrayNext(best->names))
-      {
-	if (!_cups_strcasecmp(name, "@SYSTEM") && SystemGroupAuthKey &&
-	    check_authref(con, SystemGroupAuthKey))
-	  return (HTTP_STATUS_OK);
-      }
+	for (name = (char *)cupsArrayFirst(best->names);
+	     name;
+	     name = (char *)cupsArrayNext(best->names))
+	{
+	  if (!_cups_strcasecmp(name, "@SYSTEM") && SystemGroupAuthKey &&
+	      check_authref(con, SystemGroupAuthKey))
+	    return (HTTP_STATUS_OK);
+	}
 
-      return (HTTP_STATUS_FORBIDDEN);
-    }
+	return (HTTP_STATUS_FORBIDDEN);
+      }
 #endif /* HAVE_AUTHORIZATION_H */
 
-    for (name = (char *)cupsArrayFirst(best->names);
-	 name;
-	 name = (char *)cupsArrayNext(best->names))
-    {
-      if (!_cups_strcasecmp(name, "@OWNER") && owner &&
-          !_cups_strcasecmp(username, ownername))
-	return (HTTP_STATUS_OK);
-      else if (!_cups_strcasecmp(name, "@SYSTEM"))
+      for (name = (char *)cupsArrayFirst(best->names);
+	   name;
+	   name = (char *)cupsArrayNext(best->names))
       {
-	/* Do @SYSTEM later, when every other entry fails */
-	continue;
-      }
-      else if (name[0] == '@')
-      {
-        if (cupsdCheckGroup(username, pw, name + 1))
-          return (HTTP_STATUS_OK);
-      }
-      else if (!_cups_strcasecmp(username, name))
-        return (HTTP_STATUS_OK);
-    }
-
-    for (name = (char *)cupsArrayFirst(best->names);
-	 name;
-	 name = (char *)cupsArrayNext(best->names))
-    {
-      if (!_cups_strcasecmp(name, "@SYSTEM"))
-      {
-        for (i = 0; i < NumSystemGroups; i ++)
-	  if (cupsdCheckGroup(username, pw, SystemGroups[i]) && check_admin_access(con))
-	    return (HTTP_STATUS_OK);
-      }
-    }
-
-    return (con->username[0] ? HTTP_STATUS_FORBIDDEN : HTTP_STATUS_UNAUTHORIZED);
-  }
-
- /*
-  * Check to see if this user is in any of the named groups...
-  */
-
-  cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdIsAuthorized: Checking group membership...");
-
- /*
-  * Check to see if this user is in any of the named groups...
-  */
-
-  for (name = (char *)cupsArrayFirst(best->names);
-       name;
-       name = (char *)cupsArrayNext(best->names))
-  {
-    if (!_cups_strcasecmp(name, "@SYSTEM"))
-    {
-      /* Do @SYSTEM later, when every other entry fails */
-      continue;
-    }
-
-    cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdIsAuthorized: Checking group \"%s\" membership...", name);
-
-    if (cupsdCheckGroup(username, pw, name))
-      return (HTTP_STATUS_OK);
-  }
-
-  for (name = (char *)cupsArrayFirst(best->names);
-       name;
-       name = (char *)cupsArrayNext(best->names))
-  {
-    if (!_cups_strcasecmp(name, "@SYSTEM"))
-    {
-      cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdIsAuthorized: Checking group \"%s\" membership...", name);
-
-      for (i = 0; i < NumSystemGroups; i ++)
-	if (cupsdCheckGroup(username, pw, SystemGroups[i]) && check_admin_access(con))
+	if (!_cups_strcasecmp(name, "@OWNER") && owner &&
+	    !_cups_strcasecmp(username, ownername))
 	  return (HTTP_STATUS_OK);
+	else if (!_cups_strcasecmp(name, "@SYSTEM"))
+	{
+	  /* Do @SYSTEM later, when every other entry fails */
+	  continue;
+	}
+	else if (name[0] == '@')
+	{
+	  if (cupsdCheckGroup(username, pw, name + 1))
+	    return (HTTP_STATUS_OK);
+	}
+	else if (!_cups_strcasecmp(username, name))
+	  return (HTTP_STATUS_OK);
+      }
+
+      for (name = (char *)cupsArrayFirst(best->names);
+	   name;
+	   name = (char *)cupsArrayNext(best->names))
+      {
+	if (!_cups_strcasecmp(name, "@SYSTEM"))
+	{
+	  for (i = 0; i < NumSystemGroups; i ++)
+	    if (cupsdCheckGroup(username, pw, SystemGroups[i]) && check_admin_access(con))
+	      return (HTTP_STATUS_OK);
+	}
+      }
+    }
+    else
+    {
+     /*
+      * Check to see if this user is in any of the named groups...
+      */
+
+      cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdIsAuthorized: Checking group membership...");
+
+     /*
+      * Check to see if this user is in any of the named groups...
+      */
+
+      for (name = (char *)cupsArrayFirst(best->names);
+	   name;
+	   name = (char *)cupsArrayNext(best->names))
+      {
+	if (!_cups_strcasecmp(name, "@SYSTEM"))
+	{
+	  /* Do @SYSTEM later, when every other entry fails */
+	  continue;
+	}
+
+	cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdIsAuthorized: Checking group \"%s\" membership...", name);
+
+	if (cupsdCheckGroup(username, pw, name))
+	  return (HTTP_STATUS_OK);
+      }
+
+      for (name = (char *)cupsArrayFirst(best->names);
+	   name;
+	   name = (char *)cupsArrayNext(best->names))
+      {
+	if (!_cups_strcasecmp(name, "@SYSTEM"))
+	{
+	  cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdIsAuthorized: Checking group \"%s\" membership...", name);
+
+	  for (i = 0; i < NumSystemGroups; i ++)
+	    if (cupsdCheckGroup(username, pw, SystemGroups[i]) && check_admin_access(con))
+	      return (HTTP_STATUS_OK);
+	}
+      }
     }
   }
 
  /*
-  * The user isn't part of the specified group, so deny access...
+  * The user isn't part of the specified users or groups, so deny access...
   */
 
   cupsdLogMessage(CUPSD_LOG_DEBUG, "cupsdIsAuthorized: User not in group(s).");
@@ -2118,13 +2386,29 @@ check_authref(cupsd_client_t *con,	/* I - Connection */
  * 'compare_locations()' - Compare two locations.
  */
 
-static int                             /* O - Result of comparison */
-compare_locations(cupsd_location_t *a, /* I - First location */
-                  cupsd_location_t *b, /* I - Second location */
-                  void *data)          /* Unused */
+static int				/* O - Result of comparison */
+compare_locations(cupsd_location_t *a,	/* I - First location */
+                  cupsd_location_t *b,	/* I - Second location */
+                  void *data)		/* I - Callback data (unused) */
 {
   (void)data;
+
   return (strcmp(b->location, a->location));
+}
+
+
+/*
+ * 'compare_ogroups()' - Compare two OAuth groups.
+ */
+
+static int				/* O - Result of comparison */
+compare_ogroups(cupsd_ogroup_t *a,	/* I - First group */
+                cupsd_ogroup_t *b,	/* I - Second group */
+                void           *data)	/* I - Callback data (unused) */
+{
+  (void)data;
+
+  return (_cups_strcasecmp(a->name, b->name));
 }
 
 
@@ -2173,7 +2457,7 @@ copy_authmask(cupsd_authmask_t *mask,	/* I - Existing auth mask */
 
 static void
 free_authmask(cupsd_authmask_t *mask,	/* I - Auth mask to free */
-              void             *data)	/* I - User data (unused) */
+              void             *data)	/* I - Callback data (unused) */
 {
   (void)data;
 
@@ -2181,6 +2465,67 @@ free_authmask(cupsd_authmask_t *mask,	/* I - Auth mask to free */
     _cupsStrFree(mask->mask.name.name);
 
   free(mask);
+}
+
+
+/*
+ * 'free_ogroup()' - Free an OAuth group.
+ */
+
+static void
+free_ogroup(cupsd_ogroup_t *og,		/* I - OAuth group */
+            void           *data)	/* I - Callback data (unused) */
+{
+  (void)data;
+
+  free(og->name);
+  free(og->filename);
+  cupsArrayDelete(og->members);
+  free(og);
+}
+
+
+/*
+ * 'load_ogroup()' - Load an OAuth group file.
+ */
+
+static int				/* O - 1 on success, 0 on failure */
+load_ogroup(cupsd_ogroup_t *og,		/* I - OAuth group */
+            struct stat    *fileinfo)	/* I - File information */
+{
+  cups_file_t	*fp;			/* File pointer */
+  char		line[1024];		/* Line from file */
+
+
+ /*
+  * Make sure we have a fresh members array...
+  */
+
+  cupsArrayDelete(og->members);
+  if ((og->members = cupsArrayNewStrings(/*s*/NULL, /*delim*/'\0')) == NULL)
+  {
+    cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to allocate members array for OAuth group %s: %s", og->name, strerror(errno));
+    return (0);
+  }
+
+ /*
+  * Load the members file...
+  */
+
+  if ((fp = cupsFileOpen(og->filename, "r")) == NULL)
+  {
+    cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to open OAuth group %s filename \"%s\": %s", og->name, og->filename, strerror(errno));
+    return (0);
+  }
+
+  while (cupsFileGets(fp, line, sizeof(line)))
+    cupsArrayAdd(og->members, line);
+
+  cupsFileClose(fp);
+
+  og->fileinfo = *fileinfo;
+
+  return (1);
 }
 
 

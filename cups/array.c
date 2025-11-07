@@ -1,7 +1,7 @@
 //
 // Sorted array routines for CUPS.
 //
-// Copyright © 2020-2024 by OpenPrinting.
+// Copyright © 2020-2025 by OpenPrinting.
 // Copyright © 2007-2014 by Apple Inc.
 // Copyright © 1997-2007 by Easy Software Products.
 //
@@ -65,7 +65,7 @@ static int	cups_array_find(cups_array_t *a, void *e, int prev, int *rdiff);
 // appended at the end of the run of identical elements.  For unsorted arrays,
 // the element is appended to the end of the array.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 int					// O - 1 on success, 0 on failure
@@ -109,7 +109,7 @@ cupsArrayAddStrings(cups_array_t *a,	// I - Array
 
   DEBUG_printf("_cupsArrayAddStrings(a=%p, s=\"%s\", delim='%c')", (void *)a, s, delim);
 
-  if (!a || !s || !*s)
+  if (!a || !s || !*s || delim == '\0')
   {
     DEBUG_puts("1_cupsArrayAddStrings: Returning 0");
     return (false);
@@ -183,7 +183,7 @@ cupsArrayAddStrings(cups_array_t *a,	// I - Array
 // The caller is responsible for freeing the memory used by the
 // elements themselves.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 void
@@ -248,7 +248,7 @@ cupsArrayCurrent(cups_array_t *a)	// I - Array
 // The caller is responsible for freeing the memory used by the
 // elements themselves.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 void
@@ -283,7 +283,7 @@ cupsArrayDelete(cups_array_t *a)	// I - Array
 //
 // 'cupsArrayDup()' - Duplicate the array.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 cups_array_t *				// O - Duplicate array
@@ -347,7 +347,7 @@ cupsArrayDup(cups_array_t *a)		// I - Array
 //
 // 'cupsArrayFind()' - Find an element in the array.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 void *					// O - Element found or `NULL`
@@ -430,6 +430,20 @@ void *					// O - First element or `NULL` if the array is empty
 cupsArrayFirst(cups_array_t *a)		// I - Array
 {
   return (cupsArrayGetFirst(a));
+}
+
+
+//
+// '_cupsArrayFree()' - Free a string in an array.
+//
+
+void
+_cupsArrayFree(void *s,			// I - String to free
+               void *data)		// I - Callback data (unused)
+{
+  (void)data;
+
+  free(s);
 }
 
 
@@ -520,7 +534,7 @@ cupsArrayGetFirst(cups_array_t *a)	// I - Array
 // The current element is undefined until you call @link cupsArrayFind@,
 // @link cupsArrayFirst@, or @link cupsArrayIndex@, or @link cupsArrayLast@.
 //
-// @since CUPS 1.3/macOS 10.5@
+// @since CUPS 1.3@
 //
 
 int					// O - Index of the current element, starting at 0
@@ -536,7 +550,7 @@ cupsArrayGetIndex(cups_array_t *a)	// I - Array
 //
 // 'cupsArrayGetInsert()' - Get the index of the last inserted element.
 //
-// @since CUPS 1.3/macOS 10.5@
+// @since CUPS 1.3@
 //
 
 int					// O - Index of the last inserted element, starting at 0
@@ -666,7 +680,7 @@ cupsArrayIndex(cups_array_t *a,		// I - Array
 // inserted at the beginning of the run of identical elements.  For unsorted
 // arrays, the element is inserted at the beginning of the array.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 int					// O - 0 on failure, 1 on success
@@ -761,7 +775,7 @@ cupsArrayNew2(cups_array_cb_t  f,	// I - Comparison function or `NULL` for an un
 // removed with @link cupsArrayRemove@ or the array is deleted with
 // @link cupsArrayDelete@.
 //
-// @since CUPS 1.5/macOS 10.7@
+// @since CUPS 1.5@
 //
 
 cups_array_t *				// O - Array
@@ -827,7 +841,7 @@ cupsArrayNewStrings(const char *s,	// I - Delimited strings or `NULL`
   cups_array_t	*a;			// Array
 
 
-  if ((a = cupsArrayNew3((cups_array_cb_t)strcmp, NULL, NULL, 0, (cups_acopy_cb_t)_cupsArrayStrdup, (cups_afree_cb_t)_cupsArrayFree)) != NULL)
+  if ((a = cupsArrayNew3(_cupsArrayStrcmp, NULL, NULL, 0, _cupsArrayStrdup, _cupsArrayFree)) != NULL)
     cupsArrayAddStrings(a, s, delim);
 
   return (a);
@@ -881,7 +895,7 @@ cupsArrayPrev(cups_array_t *a)		// I - Array
 // The caller is responsible for freeing the memory used by the
 // removed element.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 int					// O - 1 on success, 0 on failure
@@ -938,7 +952,7 @@ cupsArrayRemove(cups_array_t *a,	// I - Array
 //
 // 'cupsArrayRestore()' - Reset the current element to the last @link cupsArraySave@.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 void *					// O - New current element
@@ -969,7 +983,7 @@ cupsArrayRestore(cups_array_t *a)	// I - Array
 //
 // The save/restore stack is guaranteed to be at least 32 elements deep.
 //
-// @since CUPS 1.2/macOS 10.5@
+// @since CUPS 1.2@
 //
 
 int					// O - 1 on success, 0 on failure
@@ -985,6 +999,50 @@ cupsArraySave(cups_array_t *a)		// I - Array
   a->num_saved ++;
 
   return (1);
+}
+
+
+//
+// '_cupsArrayStrcasecmp()' - Compare two strings in an array, ignoring case...
+//
+
+int					// O - Result of comparison
+_cupsArrayStrcasecmp(void *s,		// I - First string
+                     void *t,		// I - Second string
+                     void *data)	// I - Callback data (unused)
+{
+  (void)data;
+
+  return (_cups_strcasecmp((const char *)s, (const char *)t));
+}
+
+
+//
+// '_cupsArrayStrcmp()' - Compare two strings in an array.
+//
+
+int					// O - Result of comparison
+_cupsArrayStrcmp(void *s,		// I - first string to compare
+	         void *t,		// I - second string to compare
+                 void *data)		// I - Callback data (unused)
+{
+  (void)data;
+
+  return (strcmp((const char *)s, (const char *)t));
+}
+
+
+//
+// '_cupsArrayStrdup()' - Copy a string in an array.
+//
+
+void *					// O - Copy of string
+_cupsArrayStrdup(void *s,		// I - String to copy
+                 void *data)		// I - Callback data (unused)
+{
+  (void)data;
+
+  return (strdup((const char *)s));
 }
 
 
@@ -1252,44 +1310,4 @@ cups_array_find(cups_array_t *a,	// I - Array
   *rdiff = diff;
 
   return (current);
-}
-
-
-/*
- * '_cupsArrayStrcmp()' - Meant to be passed as a pointer to CUPS arrays instead
- * of strcmp. Will also work if called directly.
- */
-
-int _cupsArrayStrcmp(const char *s1, /* I - first string to compare */
-                     const char *s2, /* I - second string to compare */
-                     void *data)     /* Unused */
-{
-  (void)data;
-  return (strcmp(s1, s2));
-}
-
-
-/*
- * '_cupsArrayStrdup()' - Meant to be passed as a pointer to CUPS arrays instead
- * of strdup. Will also work if called directly.
- */
-
-char *_cupsArrayStrdup(const char *element, /* I - element to duplicate */
-                       void *data)          /* Unused */
-{
-  (void)data;
-  return (strdup(element));
-}
-
-
-/*
- * '_cupsArrayFree()' - Meant to be passed as a pointer to CUPS arrays instead
- * of free. Will also work if called directly.
- */
-
-void _cupsArrayFree(void *element, /* I - element to free */
-                    void *data)    /* Unused */
-{
-  (void)data;
-  free(element);
 }

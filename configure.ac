@@ -45,31 +45,6 @@ AS_IF([test x$enable_shared = xno], [
     PKGCONFIG_LIBS_STATIC=""
 ])
 
-dnl See what languages are available and make sure we generate the localization
-dnl files as needed...
-INSTALL_LANGUAGES=""
-UNINSTALL_LANGUAGES=""
-LANGFILES=""
-AS_IF([test "x$LANGUAGES" != x], [
-    INSTALL_LANGUAGES="install-languages"
-    UNINSTALL_LANGUAGES="uninstall-languages"
-    for lang in $LANGUAGES; do
-	AS_IF([test -f doc/$lang/index.html.in], [
-	    LANGFILES="$LANGFILES doc/$lang/index.html"
-	])
-
-	AS_IF([test -f templates/$lang/header.tmpl.in], [
-	    LANGFILES="$LANGFILES templates/$lang/header.tmpl"
-	])
-    done
-], [test "x$CUPS_BUNDLEDIR" != x], [
-    INSTALL_LANGUAGES="install-langbundle"
-    UNINSTALL_LANGUAGES="uninstall-langbundle"
-])
-
-AC_SUBST([INSTALL_LANGUAGES])
-AC_SUBST([UNINSTALL_LANGUAGES])
-
 dnl Provide autoconf with a list of files to generate and output them...
 AC_CONFIG_FILES([
     Makedefs
@@ -79,9 +54,7 @@ AC_CONFIG_FILES([
     conf/pam.std
     conf/snmp.conf
     cups.pc
-    cups-config
     desktop/cups.desktop
-    doc/index.html
     scheduler/cups-lpd.xinetd
     scheduler/cups.sh
     scheduler/cups.xml
@@ -90,11 +63,6 @@ AC_CONFIG_FILES([
     scheduler/cups.path
     scheduler/cups.service
     scheduler/cups.socket
-    templates/header.tmpl
     packaging/cups.list
-    $LANGFILES
 ])
 AC_OUTPUT
-
-dnl Make sure cups-config script is executable
-chmod +x cups-config

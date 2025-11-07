@@ -1,7 +1,7 @@
 //
 // DNS-SD API functions for CUPS.
 //
-// Copyright © 2022-2024 by OpenPrinting.
+// Copyright © 2022-2025 by OpenPrinting.
 //
 // Licensed under Apache License v2.0.  See the file "LICENSE" for more
 // information.
@@ -25,6 +25,7 @@
 #  endif // _WIN32
 #elif _WIN32
 #  include <windns.h>
+#  pragma comment(lib, "dnsapi.lib")	  // Link in dnsapi library...
 #else // HAVE_AVAHI
 #  include <avahi-client/client.h>
 #  include <avahi-client/lookup.h>
@@ -37,6 +38,13 @@
 #  define AVAHI_DNS_TYPE_LOC 29		// Per RFC 1876
 #  include <net/if.h>
 #endif // HAVE_MDNSRESPONDER
+
+
+//
+// Constants...
+//
+
+#define _CUPS_DNSSD_MAX		50	// Maximum number of browsers/services/etc.
 
 
 //
@@ -61,6 +69,7 @@ struct _cups_dnssd_s			// DNS-SD context
   cups_thread_t		monitor;	// Monitoring thread
 
 #elif _WIN32
+  char			hostname[256];	// Current mDNS hostname
 
 #else // HAVE_AVAHI
   cups_mutex_t		mutex;		// Avahi poll mutex
@@ -70,7 +79,8 @@ struct _cups_dnssd_s			// DNS-SD context
   cups_thread_t		monitor;	// Monitoring thread
   AvahiDomainBrowser	*dbrowser;	// Domain browser
   size_t		num_domains;	// Number of domains
-  char			domains[32][256];// Domains
+  char			domains[_CUPS_DNSSD_MAX][256];
+					// Domains
 #endif // HAVE_MDNSRESPONDER
 };
 
@@ -82,10 +92,20 @@ struct _cups_dnssd_browse_s		// DNS-SD browse request
 
 #ifdef HAVE_MDNSRESPONDER
   DNSServiceRef		ref;		// Browse reference
+
 #elif _WIN32
+  size_t		num_browsers;	// Number of browsers
+  struct
+  {					// Browsers
+    WCHAR		name[256];		// Browse name as a UTF-16 string
+    DNS_SERVICE_BROWSE_REQUEST req;		// Browse request
+    DNS_SERVICE_CANCEL	cancel;			// Cancellation structure
+  }			browsers[_CUPS_DNSSD_MAX];
+
 #else // HAVE_AVAHI
   size_t		num_browsers;	// Number of browsers
-  AvahiServiceBrowser	*browsers[33];	// Browsers
+  AvahiServiceBrowser	*browsers[_CUPS_DNSSD_MAX];
+					// Browsers
 #endif // HAVE_MDNSRESPONDER
 };
 
@@ -97,7 +117,13 @@ struct _cups_dnssd_query_s		// DNS-SD query request
 
 #ifdef HAVE_MDNSRESPONDER
   DNSServiceRef		ref;		// Query reference
+
 #elif _WIN32
+  WCHAR			fullname[256];	// Query full name as a UTF-16 string
+  MDNS_QUERY_REQUEST	req;		// Query request
+  MDNS_QUERY_HANDLE	handle;		// Query handle
+  DNS_QUERY_RESULT	res;		// Query result
+
 #else // HAVE_AVAHI
   AvahiRecordBrowser	*browser;	// Browser
 #endif // HAVE_MDNSRESPONDER
@@ -111,11 +137,27 @@ struct _cups_dnssd_resolve_s		// DNS-SD resolve request
 
 #ifdef HAVE_MDNSRESPONDER
   DNSServiceRef		ref;		// Resolve reference
+
 #elif _WIN32
+  WCHAR			fullname[256];	// Full name as a UTF-16 string
+  DNS_SERVICE_RESOLVE_REQUEST req;	// Resolve request
+  DNS_SERVICE_CANCEL	cancel;		// Cancellation structure
+
 #else // HAVE_AVAHI
   AvahiServiceResolver	*resolver;	// Resolver
 #endif // HAVE_MDNSRESPONDER
 };
+
+#if _WIN32
+struct _win32_srv_s			// Service
+{
+  DNS_SERVICE_REGISTER_REQUEST req;	// Registration request
+  DNS_SERVICE_CANCEL	cancel;		// Cancellation structure
+  WCHAR		fullname[256];		// Full service name
+  WCHAR		hostname[256];		// Hostname
+  WCHAR		*txt;			// TXT key/value string buffer
+};
+#endif // _WIN32
 
 struct _cups_dnssd_service_s		// DNS-SD service registration
 {
@@ -129,9 +171,16 @@ struct _cups_dnssd_service_s		// DNS-SD service registration
 
 #ifdef HAVE_MDNSRESPONDER
   size_t		num_refs;	// Number of service references
-  DNSServiceRef		refs[16];	// Service references
-  DNSRecordRef		loc_refs[16];	// Service location records
+  DNSServiceRef		refs[_CUPS_DNSSD_MAX];
+					// Service references
+  DNSRecordRef		loc_refs[_CUPS_DNSSD_MAX];
+					// Service location records
+
 #elif _WIN32
+  size_t		num_srvs;	// Number of services
+  struct _win32_srv_s	srvs[_CUPS_DNSSD_MAX];
+					// Services
+
 #else // HAVE_AVAHI
   AvahiEntryGroup	*group;		// Group of services under this name
 #endif // HAVE_MDNSRESPONDER
@@ -159,17 +208,25 @@ static const char	*mdns_strerror(DNSServiceErrorType errorCode);
 static cups_dnssd_flags_t mdns_to_cups(DNSServiceFlags flags, DNSServiceErrorType error);
 
 #elif _WIN32
+static void		win32_browse_cb(DWORD status, PVOID context, PDNS_RECORD record);
+static void		win32_query_cb(PVOID context, PMDNS_QUERY_HANDLE handle, PDNS_QUERY_RESULT result);
+static void		win32_resolve_cb(DWORD status, PVOID context, PDNS_SERVICE_INSTANCE instance);
+static void		win32_service_cb(DWORD status, PVOID context, PDNS_SERVICE_INSTANCE instance);
+static void		win32_utf8cpy(char *dst, const WCHAR *src, size_t dstsize);
+static void		win32_wstrcpy(WCHAR *dst, const char *src, size_t dstsize);
 
 #else // HAVE_AVAHI
 static void		avahi_browse_cb(AvahiServiceBrowser *browser, AvahiIfIndex if_index, AvahiProtocol protocol, AvahiBrowserEvent event, const char *name, const char *type, const char *domain, AvahiLookupResultFlags flags, cups_dnssd_browse_t *browse);
 static void		avahi_client_cb(AvahiClient *c, AvahiClientState state, cups_dnssd_t *dnssd);
 static void		avahi_domain_cb(AvahiDomainBrowser *b, AvahiIfIndex interface, AvahiProtocol protocol, AvahiBrowserEvent event, const char *domain, AvahiLookupResultFlags flags, cups_dnssd_t *dnssd);
 static AvahiIfIndex	avahi_if_index(uint32_t if_index);
+static void		avahi_lock(cups_dnssd_t *dnssd, const char *name);
 static void		*avahi_monitor(cups_dnssd_t *dnssd);
 static int		avahi_poll_cb(struct pollfd *ufds, unsigned int nfds, int timeout, cups_dnssd_t *dnssd);
 static void		avahi_query_cb(AvahiRecordBrowser *browser, AvahiIfIndex if_index, AvahiProtocol protocol, AvahiBrowserEvent event, const char *fullName, uint16_t rrclass, uint16_t rrtype, const void *rdata, size_t rdlen, AvahiLookupResultFlags flags, cups_dnssd_query_t *query);
 static void		avahi_resolve_cb(AvahiServiceResolver *resolver, AvahiIfIndex if_index, AvahiProtocol protocol, AvahiResolverEvent event, const char *name, const char *type, const char *domain, const char *host_name, const AvahiAddress *address, uint16_t port, AvahiStringList *txtrec, AvahiLookupResultFlags flags, cups_dnssd_resolve_t *resolve);
 static void		avahi_service_cb(AvahiEntryGroup *srv, AvahiEntryGroupState state, cups_dnssd_service_t *service);
+static void		avahi_unlock(cups_dnssd_t *dnssd, const char *name);
 #endif // HAVE_MDNSRESPONDER
 
 
@@ -185,7 +242,7 @@ static void		avahi_service_cb(AvahiEntryGroup *srv, AvahiEntryGroupState state, 
 bool					// O - `true` on success, `false` on failure
 cupsDNSSDAssembleFullName(
     char       *fullname,		// I - Buffer for full name
-    size_t     fullsize,		// I - Size of buffer
+    size_t     fullsize,			// I - Size of buffer
     const char *name,			// I - Service instance name
     const char *type,			// I - Registration type
     const char *domain)			// I - Domain
@@ -200,7 +257,28 @@ cupsDNSSDAssembleFullName(
   return (DNSServiceConstructFullName(fullname, name, type, domain) == kDNSServiceErr_NoError);
 
 #elif _WIN32
-  return (false);
+  char		*fullptr,		// Pointer into full name
+		*fullend;		// End of full name
+
+  for (fullptr = fullname, fullend = fullname + fullsize - 1; *name; name ++)
+  {
+    if (*name == ' ' || *name == '\\' || (*name & 0x80))
+    {
+      if ((fullend - fullptr) < 4)
+        return (false);
+
+      snprintf(fullptr, fullend - fullptr + 1, "\\%03d", *name & 255);
+      fullptr += strlen(fullptr);
+    }
+    else
+    {
+      *fullptr++ = *name;
+    }
+  }
+
+  snprintf(fullptr, fullend - fullptr + 1, ".%s.%s", type, domain ? domain : "local");
+
+  return (true);
 
 #else // HAVE_AVAHI
   return (!avahi_service_name_join(fullname, fullsize, name, type, domain));
@@ -324,51 +402,133 @@ cupsDNSSDBrowseNew(
   }
 
 #elif _WIN32
+  DNS_STATUS	status;			// DNS request status
+  int		i,			// Looping var
+		count;			// Number of types
+  const char	*base,			// Base query name
+		*subtype;		// Subtype
+  char		typename[256];		// Current query name
+  cups_array_t	*tarray;		// Types array
 
-#else // HAVE_AVAHI
-  if (!dnssd->in_callback)
+
+  if ((tarray = cupsArrayNewStrings(types, ',')) == NULL)
   {
-    DEBUG_puts("2cupsDNSSDBrowseNew: Locking mutex.");
-    cupsMutexLock(&dnssd->mutex);
-  }
-
-  browse->num_browsers = 1;
-  browse->browsers[0]  = avahi_service_browser_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, types, /*domain*/NULL, /*flags*/0, (AvahiServiceBrowserCallback)avahi_browse_cb, browse);
-
-  if (!browse->browsers[0])
-  {
-    report_error(dnssd, "Unable to create DNS-SD browse request: %s", avahi_strerror(avahi_client_errno(dnssd->client)));
+    report_error(dnssd, "Unable to create types array: %s", strerror(errno));
     free(browse);
     browse = NULL;
-
-    if (!dnssd->in_callback)
-    {
-      DEBUG_puts("2cupsDNSSDBrowseNew: Unlocking mutex.");
-      cupsMutexUnlock(&dnssd->mutex);
-    }
-
     goto done;
   }
 
-  if (!domain && dnssd->num_domains > 0)
-  {
-    // Add browsers for all domains...
-    size_t	i;			// Looping var
+  base  = (const char *)cupsArrayGetElement(tarray, 0);
+  count = cupsArrayGetCount(tarray);
 
-    for (i = 0; i < dnssd->num_domains; i ++)
+  if (count == 1)
+    count ++;
+
+  for (i = 1; i < count; i ++)
+  {
+    subtype = (const char *)cupsArrayGetElement(tarray, i);
+
+    if (subtype)
+      snprintf(typename, sizeof(typename), "%s._sub.%s.local", subtype, base);
+    else
+      snprintf(typename, sizeof(typename), "%s.local", base);
+
+    browse->browsers[i].req.Version         = DNS_QUERY_REQUEST_VERSION1;
+    browse->browsers[i].req.InterfaceIndex  = if_index;
+    browse->browsers[i].req.pBrowseCallback = win32_browse_cb;
+    browse->browsers[i].req.pQueryContext   = browse;
+    browse->browsers[i].req.QueryName       = browse->browsers[i].name;
+
+    win32_wstrcpy(browse->browsers[i].name, typename, sizeof(browse->browsers[i].name));
+
+    if ((status = DnsServiceBrowse(&browse->browsers[i].req, &browse->browsers[i].cancel)) != DNS_REQUEST_PENDING)
     {
-      if ((browse->browsers[browse->num_browsers] = avahi_service_browser_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, types, dnssd->domains[i], /*flags*/0, (AvahiServiceBrowserCallback)avahi_browse_cb, browse)) != NULL)
-        browse->num_browsers ++;
+      report_error(dnssd, "Unable to create browser: %u", status);
+      while (i > 0)
+      {
+        i --;
+        DnsServiceBrowseCancel(&browse->browsers[i].cancel);
+      }
+      free(browse);
+      browse = NULL;
+      cupsArrayDelete(tarray);
+      goto done;
     }
   }
 
-  if (!dnssd->in_callback)
-  {
-    DEBUG_puts("2cupsDNSSDBrowseNew: Unlocking mutex.");
-    cupsMutexUnlock(&dnssd->mutex);
+  cupsArrayDelete(tarray);
 
-    avahi_simple_poll_wakeup(dnssd->poll);
+#else // HAVE_AVAHI
+  size_t	i, j,		// Looping vars
+		count;		// Number of types
+  const char	*base,		// Base query name
+		*subtype;	// Subtype
+  char		typename[256];	// Current query name
+  cups_array_t	*tarray;	// Types array
+
+
+  if ((tarray = cupsArrayNewStrings(types, ',')) == NULL)
+  {
+    report_error(dnssd, "Unable to create types array: %s", strerror(errno));
+    free(browse);
+    browse = NULL;
+    goto done;
   }
+
+  base  = (const char *)cupsArrayGetElement(tarray, 0);
+  count = cupsArrayGetCount(tarray);
+
+  if (count == 1)
+    count ++;
+
+  avahi_lock(dnssd, "cupsDNSSDBrowseNew");
+
+  for (i = 1; i < count && browse->num_browsers < _CUPS_DNSSD_MAX; i ++)
+  {
+    subtype = (const char *)cupsArrayGetElement(tarray, i);
+
+    if (subtype)
+      snprintf(typename, sizeof(typename), "%s._sub.%s", subtype, base);
+    else
+      cupsCopyString(typename, base, sizeof(typename));
+
+    if ((browse->browsers[browse->num_browsers] = avahi_service_browser_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, typename, domain, /*flags*/0, (AvahiServiceBrowserCallback)avahi_browse_cb, browse)) != NULL)
+    {
+      browse->num_browsers ++;
+    }
+    else
+    {
+      report_error(dnssd, "Unable to create DNS-SD browse request: %s", avahi_strerror(avahi_client_errno(dnssd->client)));
+      while (browse->num_browsers > 0)
+      {
+        browse->num_browsers --;
+        avahi_service_browser_free(browse->browsers[browse->num_browsers]);
+      }
+      free(browse);
+      browse = NULL;
+
+      cupsArrayDelete(tarray);
+
+      goto avahi_done;
+    }
+
+    if (!domain && dnssd->num_domains > 0)
+    {
+      // Add browsers for all domains...
+      for (j = 0; j < dnssd->num_domains && browse->num_browsers < _CUPS_DNSSD_MAX; j ++)
+      {
+	if ((browse->browsers[browse->num_browsers] = avahi_service_browser_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, typename, dnssd->domains[i], /*flags*/0, (AvahiServiceBrowserCallback)avahi_browse_cb, browse)) != NULL)
+	  browse->num_browsers ++;
+      }
+    }
+  }
+
+  cupsArrayDelete(tarray);
+
+  avahi_done:
+
+  avahi_unlock(dnssd, "cupsDNSSDBrowseNew");
 #endif // HAVE_MDNSRESPONDER
 
   DEBUG_printf("2cupsDNSSDBrowseNew: Adding browse=%p", (void *)browse);
@@ -441,6 +601,11 @@ cupsDNSSDCopyComputerName(
   if ((bufptr = strchr(buffer, '.')) != NULL)
     *bufptr = '\0';
 
+#elif _WIN32
+  DWORD	size = (DWORD)bufsize;		// Size for GetComputerNameA
+
+  GetComputerNameA(buffer, &size);
+
 #else // HAVE_AVAHI
   cupsCopyString(buffer, avahi_client_get_host_name(dnssd->client), bufsize);
 #endif // __APPLE__
@@ -483,6 +648,9 @@ cupsDNSSDCopyHostName(
 
   DEBUG_puts("2cupsDNSSDCopyHostName: Unlocking rwlock.");
   cupsRWUnlock(&dnssd->rwlock);
+
+#elif _WIN32
+  cupsCopyString(buffer, dnssd->hostname, bufsize);
 
 #else // HAVE_AVAHI
   cupsCopyString(buffer, avahi_client_get_host_name_fqdn(dnssd->client), bufsize);
@@ -691,6 +859,12 @@ cupsDNSSDNew(
   DEBUG_printf("2cupsDNSSDNew: dnssd->monitor=%p", (void *)dnssd->monitor);
 
 #elif _WIN32
+  char	compname[256];			// Computer name
+  DWORD	compsize = sizeof(compname);	// Size of computer name buffer
+
+  GetComputerNameA(compname, &compsize);
+
+  snprintf(dnssd->hostname, sizeof(dnssd->hostname), "%s.local", compname);
 
 #else // HAVE_AVAHI
   int error;				// Error code
@@ -860,23 +1034,31 @@ cupsDNSSDQueryNew(
   }
 
 #elif _WIN32
+  DNS_STATUS	status;		// DNS request status
+
+  win32_wstrcpy(query->fullname, fullname, sizeof(query->fullname));
+
+  query->req.Version        = DNS_QUERY_REQUEST_VERSION1;
+  query->req.InterfaceIndex = if_index;
+  query->req.Query          = query->fullname;
+  query->req.QueryType      = rrtype;
+  query->req.pQueryCallback = win32_query_cb;
+  query->req.pQueryContext  = query;
+
+  if ((status = DnsStartMulticastQuery(&query->req, &query->handle)) != ERROR_SUCCESS)
+  {
+    report_error(dnssd, "Unable to start mDNS query request: %d", status);
+    free(query);
+    query = NULL;
+    goto done;
+  }
 
 #else // HAVE_AVAHI
-  if (!dnssd->in_callback)
-  {
-    DEBUG_puts("4avahi_poll_cb: Locking mutex.");
-    cupsMutexLock(&dnssd->mutex);
-  }
+  avahi_lock(dnssd, "cupsDNSSDQueryNew");
 
   query->browser = avahi_record_browser_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, fullname, AVAHI_DNS_CLASS_IN, rrtype, 0, (AvahiRecordBrowserCallback)avahi_query_cb, query);
 
-  if (!dnssd->in_callback)
-  {
-    DEBUG_puts("4avahi_poll_cb: Unlocking mutex.");
-    cupsMutexUnlock(&dnssd->mutex);
-
-    avahi_simple_poll_wakeup(dnssd->poll);
-  }
+  avahi_unlock(dnssd, "cupsDNSSDQueryNew");
 
   if (!query->browser)
   {
@@ -954,7 +1136,7 @@ cupsDNSSDResolveGetContext(
 //     const char           *fullname,
 //     const char           *host,
 //     uint16_t             port,
-//     size_t               num_txt,
+//     int                  num_txt,
 //     cups_option_t        *txt)
 // {
 //     // Process resolved service
@@ -1001,29 +1183,38 @@ cupsDNSSDResolveNew(
   resolve->ref = dnssd->ref;
   if ((error = DNSServiceResolve(&resolve->ref, kDNSServiceFlagsShareConnection, if_index, name, type, domain, (DNSServiceResolveReply)mdns_resolve_cb, resolve)) != kDNSServiceErr_NoError)
   {
-    report_error(dnssd, "Unable to create DNS-SD query request: %s", mdns_strerror(error));
+    report_error(dnssd, "Unable to create DNS-SD resolve request: %s", mdns_strerror(error));
     free(resolve);
     return (NULL);
   }
 
 #elif _WIN32
+  DNS_STATUS	status;			// Status of resolve
+  char		fullname[256];		// Full service name
+
+  snprintf(fullname, sizeof(fullname), "%s.%s.%s", name, type, domain ? domain : "local");
+
+  win32_wstrcpy(resolve->fullname, fullname, sizeof(resolve->fullname));
+
+  resolve->req.Version                    = DNS_QUERY_REQUEST_VERSION1;
+  resolve->req.InterfaceIndex             = if_index;
+  resolve->req.QueryName                  = resolve->fullname;
+  resolve->req.pResolveCompletionCallback = win32_resolve_cb;
+  resolve->req.pQueryContext              = resolve;
+
+  if ((status = DnsServiceResolve(&resolve->req, &resolve->cancel)) != DNS_REQUEST_PENDING)
+  {
+    report_error(dnssd, "Unable to create DNS-SD resolve request: %d", status);
+    free(resolve);
+    return (NULL);
+  }
 
 #else // HAVE_AVAHI
-  if (!dnssd->in_callback)
-  {
-    DEBUG_puts("2cupsDNSSDResolveNew: Locking mutex.");
-    cupsMutexLock(&dnssd->mutex);
-  }
+  avahi_lock(dnssd, "cupsDNSSDResolveNew");
 
   resolve->resolver = avahi_service_resolver_new(dnssd->client, avahi_if_index(if_index), AVAHI_PROTO_UNSPEC, name, type, domain, AVAHI_PROTO_UNSPEC, /*flags*/0, (AvahiServiceResolverCallback)avahi_resolve_cb, resolve);
 
-  if (!dnssd->in_callback)
-  {
-    DEBUG_puts("2cupsDNSSDResolveNew: Unlocking mutex.");
-    cupsMutexUnlock(&dnssd->mutex);
-
-    avahi_simple_poll_wakeup(dnssd->poll);
-  }
+  avahi_unlock(dnssd, "cupsDNSSDResolveNew");
 
   if (!resolve->resolver)
   {
@@ -1076,9 +1267,9 @@ bool					// O - `true` on success, `false` on error
 cupsDNSSDSeparateFullName(
     const char *fullname,		// I - Full service name
     char       *name,			// I - Instance name buffer
-    size_t     namesize,		// I - Size of instance name buffer
+    size_t     namesize,			// I - Size of instance name buffer
     char       *type,			// I - Registration type buffer
-    size_t     typesize,		// I - Size of registration type buffer
+    size_t     typesize,			// I - Size of registration type buffer
     char       *domain,			// I - Domain name buffer
     size_t     domainsize)		// I - Size of domain name buffer
 {
@@ -1264,6 +1455,110 @@ cupsDNSSDServiceAdd(
   service->num_refs ++;
 
 #elif _WIN32
+  DWORD		status;			// Status of call
+  struct _win32_srv_s *srv;		// Service
+  int		j,			// Looping var
+		count;			// Number of types
+  size_t	length;			// Length of TXT key/value pairs
+  WCHAR		*ptr,			// Pointer into TXT buffer
+		*end,			// End of TXT buffer
+		*keys[256],		// TXT key strings
+		*values[256];		// TXT value strings
+  const char	*base;			// Base service type
+  char		fullname[256];		// Full service instance name
+  cups_array_t	*tarray;		// Types array
+
+  if ((tarray = cupsArrayNewStrings(types, ',')) == NULL)
+  {
+    report_error(service->dnssd, "Unable to create types array: %s", strerror(errno));
+    ret = false;
+    goto done;
+  }
+
+  base  = (const char *)cupsArrayGetElement(tarray, 0);
+  count = cupsArrayGetCount(tarray);
+
+  // TODO: Figure out how WinDNS wants sub-types registered, yields invalid argument error for sub-type
+  for (i = 0; i < count && i < 1; i ++)
+  {
+    // Get the fullname...
+    if (i)
+      snprintf(fullname, sizeof(fullname), "%s.%s._sub.%s.%s", service->name, (const char*)cupsArrayGetElement(tarray, i), base, domain ? domain : "local");
+    else
+      snprintf(fullname, sizeof(fullname), "%s.%s.%s", service->name, base, domain ? domain : "local");
+
+    DEBUG_printf("cupsDNSSDServiceAdd: Adding fullname=\"%s\"", fullname);
+
+    // Get the service...
+    if (service->num_srvs >= _CUPS_DNSSD_MAX)
+    {
+      report_error(service->dnssd, "Too many services for this name.");
+      ret = false;
+      cupsArrayDelete(tarray);
+      goto done;
+    }
+
+    srv = service->srvs + service->num_srvs;
+
+    // Initialize values...
+    srv->req.Version        = DNS_QUERY_REQUEST_VERSION1;
+    srv->req.InterfaceIndex = service->if_index;
+
+    win32_wstrcpy(srv->fullname, fullname, sizeof(srv->fullname));
+    if (host)
+      win32_wstrcpy(srv->hostname, host, sizeof(srv->hostname));
+    else
+      win32_wstrcpy(srv->hostname, service->dnssd->hostname, sizeof(srv->hostname));
+
+    for (j = 0, length = 0; j < num_txt; j ++)
+      length += strlen(txt[j].name) + strlen(txt[j].value) + 2;
+
+    DEBUG_printf("cupsDNSSDServiceAdd: TXT length=%lu", (unsigned long)length);
+
+    if (length > 0)
+    {
+      srv->txt = calloc(length, sizeof(WCHAR));
+
+      for (j = 0, ptr = srv->txt, end = srv->txt + length; j < num_txt; j ++)
+      {
+        win32_wstrcpy(ptr, txt[j].name, (size_t)(end - ptr) * sizeof(WCHAR));
+        keys[j] = ptr;
+        ptr     += strlen(txt[j].name) + 1;
+
+        win32_wstrcpy(ptr, txt[j].value, (size_t)(end - ptr) * sizeof(WCHAR));
+        values[j] = ptr;
+        ptr     += strlen(txt[j].value) + 1;
+      }
+    }
+
+    if ((srv->req.pServiceInstance = DnsServiceConstructInstance(srv->fullname, srv->hostname, /*pIp4*/NULL, /*pIp6*/NULL, port, 0, 0, (DWORD)num_txt, keys, values)) == NULL)
+    {
+      report_error(service->dnssd, "Unable to allocate memory for '%s'.", fullname);
+      ret = false;
+      cupsArrayDelete(tarray);
+      goto done;
+    }
+
+    srv->req.pRegisterCompletionCallback = win32_service_cb;
+    srv->req.pQueryContext               = service;
+    srv->req.unicastEnabled              = domain && strcmp(domain, "local") != 0;
+
+    DEBUG_printf("cupsDNSSDServiceAdd: unicastEnabled=%s", srv->req.unicastEnabled ? "true" : "false");
+
+    if ((status = DnsServiceRegister(&srv->req, &srv->cancel)) != DNS_REQUEST_PENDING)
+    {
+      report_error(service->dnssd, "Unable to register '%s': %d", fullname, status);
+      ret = false;
+      DnsServiceFreeInstance(srv->req.pServiceInstance);
+      cupsArrayDelete(tarray);
+      goto done;
+    }
+
+    // Register...
+    service->num_srvs ++;
+  }
+
+  cupsArrayDelete(tarray);
 
 #else // HAVE_AVAHI
   int			error;		// Error code
@@ -1292,7 +1587,11 @@ cupsDNSSDServiceAdd(
     *subtypes++ = '\0';
 
   // Add the service entry...
-  if ((error = avahi_entry_group_add_service_strlst(service->group, avahi_if_index(service->if_index), AVAHI_PROTO_UNSPEC, /*flags*/0, service->name, regtype, domain, host, port, txtrec)) < 0)
+  avahi_lock(service->dnssd, "cupsDNSSDServiceAdd");
+
+  error = avahi_entry_group_add_service_strlst(service->group, avahi_if_index(service->if_index), AVAHI_PROTO_UNSPEC, /*flags*/0, service->name, regtype, domain, host, port, txtrec);
+
+  if (error < 0)
   {
     report_error(service->dnssd, "Unable to register '%s.%s': %s", service->name, regtype, avahi_strerror(error));
     ret = false;
@@ -1321,6 +1620,8 @@ cupsDNSSDServiceAdd(
       DEBUG_printf("cupsDNSSDServiceAdd: Registered '%s.%s.%s'.", service->name, subtype, domain);
     }
   }
+
+  avahi_unlock(service->dnssd, "cupsDNSSDServiceAdd");
 
   free(regtype);
 
@@ -1429,7 +1730,11 @@ cupsDNSSDServiceNew(
 #ifdef HAVE_MDNSRESPONDER
 #elif _WIN32
 #else // HAVE_AVAHI
+  avahi_lock(dnssd, "cupsDNSSDServiceNew");
+
   service->group = avahi_entry_group_new(dnssd->client, (AvahiEntryGroupCallback)avahi_service_cb, service);
+
+  avahi_unlock(dnssd, "cupsDNSSDServiceNew");
 
   if (!service->group)
   {
@@ -1493,8 +1798,11 @@ cupsDNSSDServicePublish(
 #elif defined(HAVE_MDNSRESPONDER)
   (void)service;
 #else // HAVE_AVAHI
+  avahi_lock(service->dnssd, "cupsDNSSDServicePublish");
+
   avahi_entry_group_commit(service->group);
-  avahi_simple_poll_wakeup(service->dnssd->poll);
+
+  avahi_unlock(service->dnssd, "cupsDNSSDServicePublish");
 #endif // _WIN32
 
   DEBUG_printf("2cupsDNSSDServicePublish: Returning %s.", ret ? "true" : "false");
@@ -1599,7 +1907,13 @@ cupsDNSSDServiceSetLocation(
   // Add LOC record now...
   int error;				// Error code
 
-  if ((error = avahi_entry_group_add_record(service->group, avahi_if_index(service->if_index), AVAHI_PROTO_UNSPEC, /*flags*/0, service->name, AVAHI_DNS_CLASS_IN, AVAHI_DNS_TYPE_LOC, /*ttl*/75 * 60, service->loc, sizeof(service->loc))) < 0)
+  avahi_lock(service->dnssd, "cupsDNSSDServiceSetLocation");
+
+  error = avahi_entry_group_add_record(service->group, avahi_if_index(service->if_index), AVAHI_PROTO_UNSPEC, /*flags*/0, service->name, AVAHI_DNS_CLASS_IN, AVAHI_DNS_TYPE_LOC, /*ttl*/75 * 60, service->loc, sizeof(service->loc));
+
+  avahi_unlock(service->dnssd, "cupsDNSSDServiceSetLocation");
+
+  if (error < 0)
   {
     report_error(service->dnssd, "Unable to register LOC record for '%s': %s", service->name, avahi_strerror(error));
     ret = false;
@@ -1622,12 +1936,20 @@ delete_browse(
   DNSServiceRefDeallocate(browse->ref);
 
 #elif _WIN32
+  size_t	i;			// Looping var
+
+  for (i = 0; i < browse->num_browsers; i ++)
+    DnsServiceBrowseCancel(&browse->browsers[i].cancel);
 
 #else // HAVE_AVAHI
   size_t	i;			// Looping var
 
+  avahi_lock(browse->dnssd, "delete_browse");
+
   for (i = 0; i < browse->num_browsers; i ++)
     avahi_service_browser_free(browse->browsers[i]);
+
+  avahi_unlock(browse->dnssd, "delete_browse");
 #endif // HAVE_MDNSRESPONDER
 
   free(browse);
@@ -1646,9 +1968,14 @@ delete_query(
   DNSServiceRefDeallocate(query->ref);
 
 #elif _WIN32
+  DnsStopMulticastQuery(&query->handle);
 
 #else // HAVE_AVAHI
+  avahi_lock(query->dnssd, "delete_query");
+
   avahi_record_browser_free(query->browser);
+
+  avahi_unlock(query->dnssd, "delete_query");
 #endif // HAVE_MDNSRESPONDER
 }
 
@@ -1665,9 +1992,14 @@ delete_resolve(
   DNSServiceRefDeallocate(resolve->ref);
 
 #elif _WIN32
+  DnsServiceResolveCancel(&resolve->cancel);
 
 #else // HAVE_AVAHI
+  avahi_lock(resolve->dnssd, "delete_resolve");
+
   avahi_service_resolver_free(resolve->resolver);
+
+  avahi_unlock(resolve->dnssd, "delete_resolve");
 #endif // HAVE_MDNSRESPONDER
 
 }
@@ -1690,9 +2022,21 @@ delete_service(
     DNSServiceRefDeallocate(service->refs[i]);
 
 #elif _WIN32
+  size_t	i;			// Looping var
+
+  for (i = 0; i < service->num_srvs; i ++)
+  {
+    DnsServiceRegisterCancel(&service->srvs[i].cancel);
+    DnsServiceFreeInstance(service->srvs[i].req.pServiceInstance);
+    free(service->srvs[i].txt);
+  }
 
 #else // HAVE_AVAHI
+  avahi_lock(service->dnssd, "delete_service");
+
   avahi_entry_group_free(service->group);
+
+  avahi_unlock(service->dnssd, "delete_service");
 #endif // HAVE_MDNSRESPONDER
 
   free(service);
@@ -2111,6 +2455,265 @@ mdns_to_cups(
 
 
 #elif _WIN32
+//
+// 'win32_browse_cb()' - Handle browse callbacks from WinDNS.
+//
+
+static void
+win32_browse_cb(
+    DWORD       status,			// I - Status
+    PVOID       context,			// I - Browser
+    PDNS_RECORD records)			// I - Record list
+{
+  cups_dnssd_browse_t *browse = (cups_dnssd_browse_t *)context;
+  PDNS_RECORD record;			// Current DNS record
+  char	      fullname[256],		// Full service instance name
+	      name[256] = "",		// Service name
+	      type[256] = "",		// Service type
+	      domain[256] = "";		// Domain name
+
+
+  for (record = records; record; record = record->pNext)
+  {
+    if (record->wType == DNS_TYPE_PTR)
+    {
+      win32_utf8cpy(fullname, record->Data.PTR.pNameHost, sizeof(fullname));
+      cupsDNSSDSeparateFullName(fullname, name, sizeof(name), type, sizeof(type), domain, sizeof(domain));
+      break;
+    }
+  }
+
+  (browse->cb)(browse, browse->cb_data, status == ERROR_SUCCESS ? CUPS_DNSSD_FLAGS_NONE : CUPS_DNSSD_FLAGS_ERROR, /*if_index*/0, name, type, domain);
+
+  DnsRecordListFree(records, DnsFreeRecordList);
+}
+
+
+//
+// 'win32_query_cb()' - Handle query callbacks from WinDNS.
+//
+
+static void
+win32_query_cb(
+    PVOID              context,		// I - Pointer to query
+    PMDNS_QUERY_HANDLE handle,		// I - Query handle
+    PDNS_QUERY_RESULT  result)		// I - Query result
+{
+  cups_dnssd_query_t  *query = (cups_dnssd_query_t *)context;
+					// Query
+  char		      fullname[256];	// Full instance name of query
+
+
+  win32_utf8cpy(fullname, query->fullname, sizeof(fullname));
+
+  if (result && result->pQueryRecords)
+  {
+    PDNS_RECORD record;			// Current DNS record
+
+    for (record = result->pQueryRecords; record; record = record->pNext)
+      (query->cb)(query, query->cb_data, CUPS_DNSSD_FLAGS_NONE, /*if_index*/0, fullname, record->wType, &record->Data, record->wDataLength);
+
+    DnsRecordListFree(result->pQueryRecords, DnsFreeRecordList);
+  }
+}
+
+
+//
+// 'win32_resolve_cb()' - Handle resolve callbacks from WinDNS.
+//
+
+static void
+win32_resolve_cb(
+    DWORD                 status,	// I - Status
+    PVOID                 context,	// I - Resolver
+    PDNS_SERVICE_INSTANCE instance)	// I - Service instance
+{
+  cups_dnssd_resolve_t	*resolve = (cups_dnssd_resolve_t *)context;
+					// Resolver
+
+
+  if (status == ERROR_SUCCESS)
+  {
+    char		fullname[256],	// Full instance name
+      			hostname[256],	// Hostname
+			txtname[256],	// TXT name
+			txtvalue[256];	// TXT value
+    DWORD		i;		// Looping var
+    int			num_txt = 0;	// Number of TXT values
+    cups_option_t	*txt = NULL;	// TXT values
+
+    win32_utf8cpy(fullname, instance->pszInstanceName, sizeof(fullname));
+    win32_utf8cpy(hostname, instance->pszHostName, sizeof(hostname));
+
+    for (i = 0; i < instance->dwPropertyCount; i ++)
+    {
+      win32_utf8cpy(txtname, instance->keys[i], sizeof(txtname));
+      win32_utf8cpy(txtvalue, instance->values[i], sizeof(txtvalue));
+
+      num_txt = cupsAddOption(txtname, txtvalue, num_txt, &txt);
+    }
+
+    (resolve->cb)(resolve, resolve->cb_data, CUPS_DNSSD_FLAGS_NONE, instance->dwInterfaceIndex, fullname, hostname, instance->wPort, num_txt, txt);
+
+    cupsFreeOptions(num_txt, txt);
+  }
+  else
+  {
+    (resolve->cb)(resolve, resolve->cb_data, CUPS_DNSSD_FLAGS_ERROR, /*if_index*/0, /*fullname*/NULL, /*host*/NULL, /*port*/0, /*num_txt*/0, /*txt*/NULL);
+  }
+}
+
+
+//
+// 'win32_service_cb()' - Handle service registration callbacks from WinDNS.
+//
+
+static void
+win32_service_cb(
+    DWORD                 status,	// I - Status
+    PVOID                 context,	// I - Service
+    PDNS_SERVICE_INSTANCE instance)	// I - New instance
+{
+  cups_dnssd_service_t *service = (cups_dnssd_service_t *)context;
+					// Service
+
+  (service->cb)(service, service->cb_data, status == ERROR_SUCCESS ? CUPS_DNSSD_FLAGS_NONE : CUPS_DNSSD_FLAGS_ERROR);
+
+  if (instance)
+    DnsServiceFreeInstance(instance);
+}
+
+
+//
+// 'win32_utf8cpy()' - Copy a UTF-16 string to a UTF-8 string.
+//
+
+static void
+win32_utf8cpy(char        *dst,		// I - Destination string
+              const WCHAR *src,		// I - Source string
+	      size_t      dstsize)	// I - Size of destination string
+{
+  int	ch;				// Current character
+
+
+  // Loop until we run out of characters or buffer space...
+  while (*src && dstsize > 4)
+  {
+    // Get the current character...
+    ch = *src++;
+
+    if (ch >= 0xd800 && ch <= 0xdbff && *src >= 0xdc00 && *src <= 0xdfff)
+    {
+      // Convert UTF-16 to unicode...
+      ch = ((ch - 0xd800) << 10) | (*src++ - 0xdc00);
+    }
+
+    if (ch < 0x80)
+    {
+      *dst++ = ch;
+    }
+    else if (ch < 0x800)
+    {
+      *dst++ = 0xc0 | (ch >> 6);
+      *dst++ = 0x80 | (ch & 0x3f);
+    }
+    else if (ch < 0x10000)
+    {
+      *dst++ = 0xe0 | (ch >> 12);
+      *dst++ = 0x80 | ((ch >> 6) & 0x3f);
+      *dst++ = 0x80 | (ch & 0x3f);
+    }
+    else
+    {
+      *dst++ = 0xf0 | (ch >> 18);
+      *dst++ = 0x80 | ((ch >> 12) & 0x3f);
+      *dst++ = 0x80 | ((ch >> 6) & 0x3f);
+      *dst++ = 0x80 | (ch & 0x3f);
+    }
+  }
+
+  // Nul-terminate the destination...
+  *dst = '\0';
+}
+
+
+//
+// 'win32_wstrcpy()' - Copy a UTF-8 string to a UTF-16 string.
+//
+
+static void
+win32_wstrcpy(WCHAR      *dst,		// I - Destination string
+              const char *src,		// I - Source string
+              size_t     dstsize)	// I - Size of destination
+{
+  int	ch;				// Current character
+
+
+  // Adjust size from bytes to words...
+  dstsize /= sizeof(WCHAR);
+
+  // Loop until we run out of characters or buffer space...
+  while (*src && dstsize > 1)
+  {
+    // Get the current character...
+    if ((*src & 0xe0) == 0xc0)
+    {
+      // Two-byte UTF-8...
+      if ((src[1] & 0xc0) != 0x80)
+        break;
+
+      ch = ((src[0] & 0x1f) << 6) | (src[1] & 0x3f);
+      src += 2;
+    }
+    else if ((*src & 0xf0) == 0xe0)
+    {
+      // Three-byte UTF-8...
+      if ((src[1] & 0xc0) != 0x80 || (src[2] & 0xc0) != 0x80)
+        break;
+
+      ch = ((src[0] & 0x1f) << 12) | ((src[1] & 0x3f) << 6) | (src[2] & 0x3f);
+      src += 3;
+    }
+    else if ((*src & 0xf8) == 0xf0)
+    {
+      // Four-byte UTF-8...
+      if ((src[1] & 0xc0) != 0x80 || (src[2] & 0xc0) != 0x80 || (src[3] & 0xc0) != 0x80)
+        break;
+
+      ch = ((src[0] & 0x1f) << 18) | ((src[1] & 0x3f) << 12) | ((src[2] & 0x3f) << 6) | (src[3] & 0x3f);
+      src += 4;
+    }
+    else
+    {
+      // US ASCII...
+      ch = *src++;
+    }
+
+    // Map it to UTF-16...
+    if (ch < 0x10000)
+    {
+      // One-word UTF-16...
+      *dst++ = ch;
+      dstsize --;
+    }
+    else if (dstsize > 2)
+    {
+      // Two-word UTF-16...
+      *dst++ = 0xd800 | ((ch >> 12) & 0x3ff);
+      *dst++ = 0xdc00 | (ch & 0x3ff);
+
+      dstsize -= 2;
+    }
+    else
+    {
+      // Terminate early...
+      break;
+    }
+  }
+
+  // Nul-terminate the destination...
+  *dst = '\0';
+}
 
 
 #else // HAVE_AVAHI
@@ -2145,8 +2748,13 @@ avahi_browse_cb(
   cups_dnssd_flags_t	cups_flags;	// CUPS DNS-SD flags
 
 
+  DEBUG_printf("3avahi_browse_cb(browser=%p, if_index=%u, protocol=%u, event=%d, name=\"%s\", type=\"%s\", domain=\"%s\", flags=%u, browse=%p)", (void *)browser, (unsigned)if_index, (unsigned)protocol, event, name, type, domain, (unsigned)flags, (void *)browse);
+
   (void)protocol;
   (void)flags;
+
+  if (!name)
+    return;
 
   switch (event)
   {
@@ -2296,6 +2904,24 @@ avahi_if_index(uint32_t if_index)	// I - DNS-SD interface index
 
 
 //
+// 'avahi_lock()' - Lock the access mutex.
+//
+
+static void
+avahi_lock(cups_dnssd_t *dnssd,		// I - DNS-SD context
+           const char   *name)		// I - Who is locking?
+{
+  (void)name;
+
+  if (!dnssd->in_callback)
+  {
+    DEBUG_printf("2avahi_lock: Locking mutex for %s.", name);
+    cupsMutexLock(&dnssd->mutex);
+  }
+}
+
+
+//
 // 'avahi_monitor()' - Background thread for Avahi.
 //
 
@@ -2397,7 +3023,7 @@ avahi_resolve_cb(
     cups_dnssd_resolve_t   *resolve)	// I - Resolve request
 {
   AvahiStringList *txtpair;		// Current pair
-  size_t	num_txt = 0;		// Number of TXT key/value pairs
+  int		num_txt = 0;		// Number of TXT key/value pairs
   cups_option_t	*txt = NULL;		// TXT key/value pairs
   char		fullname[1024];		// Full service name
 
@@ -2407,17 +3033,16 @@ avahi_resolve_cb(
   if (!resolver)
     return;
 
-  (void)resolver;
   (void)protocol;
   (void)flags;
 
   // Map the addresses "127.0.0.1" (IPv4) and "::1" (IPv6) to "localhost" to work around a well-known Avahi registration bug for local-only services (Issue #970)
-  if (address->proto == AVAHI_PROTO_INET && address->data.ipv4.address == htonl(0x7f000001))
+  if (address && address->proto == AVAHI_PROTO_INET && address->data.ipv4.address == htonl(0x7f000001))
   {
     DEBUG_puts("4avahi_resolve_cb: Mapping 127.0.0.1 to localhost.");
     host = "localhost";
   }
-  else if (address->proto == AVAHI_PROTO_INET6 && address->data.ipv6.address[0] == 0 && address->data.ipv6.address[1] == 0 && address->data.ipv6.address[2] == 0 && address->data.ipv6.address[3] == 0 && address->data.ipv6.address[4] == 0 && address->data.ipv6.address[5] == 0 && address->data.ipv6.address[6] == 0 && address->data.ipv6.address[7] == 0 && address->data.ipv6.address[8] == 0 && address->data.ipv6.address[9] == 0 && address->data.ipv6.address[10] == 0 && address->data.ipv6.address[11] == 0 && address->data.ipv6.address[12] == 0 && address->data.ipv6.address[13] == 0 && address->data.ipv6.address[14] == 0 && address->data.ipv6.address[15] == 1)
+  else if (address && address->proto == AVAHI_PROTO_INET6 && address->data.ipv6.address[0] == 0 && address->data.ipv6.address[1] == 0 && address->data.ipv6.address[2] == 0 && address->data.ipv6.address[3] == 0 && address->data.ipv6.address[4] == 0 && address->data.ipv6.address[5] == 0 && address->data.ipv6.address[6] == 0 && address->data.ipv6.address[7] == 0 && address->data.ipv6.address[8] == 0 && address->data.ipv6.address[9] == 0 && address->data.ipv6.address[10] == 0 && address->data.ipv6.address[11] == 0 && address->data.ipv6.address[12] == 0 && address->data.ipv6.address[13] == 0 && address->data.ipv6.address[14] == 0 && address->data.ipv6.address[15] == 1)
   {
     DEBUG_puts("4avahi_resolve_cb: Mapping ::1 to localhost.");
     host = "localhost";
@@ -2430,13 +3055,13 @@ avahi_resolve_cb(
 
     avahi_string_list_get_pair(txtpair, &key, &value, NULL);
 
-    DEBUG_printf("4avahi_resolve_cb: txt[%u].name=\"%s\", .value=\"%s\"", (unsigned)num_txt, key, value);
+    DEBUG_printf("4avahi_resolve_cb: txt[%d].name=\"%s\", .value=\"%s\"", num_txt, key, value);
     num_txt = cupsAddOption(key, value, num_txt, &txt);
 
     avahi_free(key);
     avahi_free(value);
   }
-  DEBUG_printf("4avahi_resolve_cb: num_txt=%u", (unsigned)num_txt);
+  DEBUG_printf("4avahi_resolve_cb: num_txt=%d", num_txt);
 
   // Create a full name for the service...
   cupsDNSSDAssembleFullName(fullname, sizeof(fullname), name, type, domain);
@@ -2476,5 +3101,25 @@ avahi_service_cb(
   DEBUG_printf("3avahi_service_cb(srv=%p, state=%s, service=%p)", srv, avahi_states[state], service);
 
   (service->cb)(service, service->cb_data, state == AVAHI_ENTRY_GROUP_COLLISION ? CUPS_DNSSD_FLAGS_COLLISION : CUPS_DNSSD_FLAGS_NONE);
+}
+
+
+//
+// 'avahi_unlock()' - Unlock the access mutex.
+//
+
+static void
+avahi_unlock(cups_dnssd_t *dnssd,	// I - DNS-SD context
+             const char   *name)	// I - Who is unlocking?
+{
+  (void)name;
+
+  if (!dnssd->in_callback)
+  {
+    DEBUG_printf("2avahi_unlock: Unlocking mutex for %s.", name);
+    cupsMutexUnlock(&dnssd->mutex);
+
+    avahi_simple_poll_wakeup(dnssd->poll);
+  }
 }
 #endif // HAVE_MDNSRESPONDER

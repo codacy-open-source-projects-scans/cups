@@ -3,7 +3,7 @@
 //
 // Note: This file is included from tls.c
 //
-// Copyright © 2020-2024 by OpenPrinting
+// Copyright © 2020-2025 by OpenPrinting
 // Copyright © 2007-2019 by Apple Inc.
 // Copyright © 1997-2007 by Easy Software Products, all rights reserved.
 //
@@ -80,9 +80,94 @@ cupsAreCredentialsValidForName(
   bool			result = false;	// Result
 
 
+  DEBUG_printf("cupsAreCredentialsValidForName(common_name=\"%s\", credentials=\"%s\")", common_name, credentials);
+
+  // Range check input...
+  if (!common_name || !credentials)
+    return (false);
+
+  // Load the credentials...
   if ((certs = openssl_load_x509(credentials)) != NULL)
   {
-    result = X509_check_host(sk_X509_value(certs, 0), common_name, strlen(common_name), 0, NULL) != 0;
+    // Check the hostname against the primary certificate...
+    X509	*cert = sk_X509_value(certs, 0);
+					// Primary certificate
+    char 	subjectName[256];	// Common name from certificate
+    STACK_OF(GENERAL_NAME) *names = NULL;
+					// subjectAltName values
+
+    DEBUG_printf("1cupsAreCredentialsValidForName: certs=%p(num=%d), cert=%p", certs, sk_X509_num(certs), cert);
+
+    X509_NAME_get_text_by_NID(X509_get_subject_name(cert), NID_commonName, subjectName, sizeof(subjectName));
+    DEBUG_printf("1cupsAreCredentialsValidForName: subjectName=\"%s\"", subjectName);
+
+    if (!_cups_strcasecmp(common_name, subjectName))
+    {
+      DEBUG_puts("1cupsAreCredentialsValidForName: Match.");
+      result = true;
+    }
+
+#ifdef DEBUG
+    char issuerName[256];
+    X509_NAME_get_text_by_NID(X509_get_issuer_name(cert), NID_commonName, issuerName, sizeof(issuerName));
+    DEBUG_printf("1cupsAreCredentialsValidForName: issuerName=\"%s\"", issuerName);
+#endif // DEBUG
+
+    if (!result)
+    {
+      names = X509_get_ext_d2i(cert, NID_subject_alt_name, /*crit*/NULL, /*idx*/NULL);
+      DEBUG_printf("1cupsAreCredentialsValidForName: names=%p", names);
+    }
+
+    if (names)
+    {
+      // Got subjectAltName values, look at them...
+      int	i,			// Looping var
+		count;			// Number of values
+
+      for (i = 0, count = sk_GENERAL_NAME_num(names); i < count && !result; i ++)
+      {
+	const GENERAL_NAME *name = sk_GENERAL_NAME_value(names, i);
+					// subjectAltName value
+
+        if (!name)
+          continue;
+
+        DEBUG_printf("1cupsAreCredentialsValidForName: subjectAltName[%d/%d].type=%d", i + 1, count, name->type);
+	if (name->type == GEN_DNS)
+	{
+	  // Match a DNS name...
+	  char	*dNSName;		// DNS name value
+
+          if (ASN1_STRING_to_UTF8((unsigned char **)&dNSName, name->d.dNSName) > 0)
+          {
+            DEBUG_printf("1cupsAreCredentialsValidForName: subjectAltName[%d/%d].dNSName=\"%s\"", i + 1, count, dNSName);
+
+            if (!_cups_strcasecmp(common_name, dNSName))
+            {
+              // Direct name match...
+              DEBUG_puts("1cupsAreCredentialsValidForName: Match.");
+              result = true;
+	    }
+	    else if (!strncmp(dNSName, "*.", 2))
+	    {
+	      // Compare wildcard...
+	      const char *domain_name = strchr(common_name, '.');
+					// Domain name of common name
+              if (domain_name && !_cups_strcasecmp(domain_name, dNSName + 1))
+              {
+		DEBUG_puts("1cupsAreCredentialsValidForName: Match.");
+                result = true;
+	      }
+	    }
+
+	    OPENSSL_free(dNSName);
+          }
+        }
+      }
+
+      GENERAL_NAMES_free(names);
+    }
 
     sk_X509_free(certs);
   }
@@ -205,7 +290,7 @@ cupsCreateCredentials(
   if (!path)
     path = http_default_path(defpath, sizeof(defpath));
 
-  if (!path || !common_name)
+  if (!path || !common_name || !*common_name)
   {
     _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), 0);
     return (false);
@@ -521,7 +606,7 @@ cupsCreateCredentialsRequest(
   if (!path)
     path = http_default_path(temp, sizeof(temp));
 
-  if (!path || !common_name)
+  if (!path || !common_name || !*common_name)
   {
     _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), 0);
     return (false);
@@ -820,6 +905,7 @@ cupsGetCredentialsTrust(
   if (!path || !credentials || !common_name)
   {
     _cupsSetError(IPP_STATUS_ERROR_INTERNAL, strerror(EINVAL), false);
+    DEBUG_printf("1cupsGetCredentialsTrust: Returning %d.", HTTP_TRUST_UNKNOWN);
     return (HTTP_TRUST_UNKNOWN);
   }
 
@@ -827,14 +913,13 @@ cupsGetCredentialsTrust(
   if ((certs = openssl_load_x509(credentials)) == NULL)
   {
     _cupsSetError(IPP_STATUS_ERROR_CUPS_PKI, _("Unable to import credentials."), true);
+    DEBUG_printf("1cupsGetCredentialsTrust: Returning %d.", HTTP_TRUST_UNKNOWN);
     return (HTTP_TRUST_UNKNOWN);
   }
 
   cert = sk_X509_value(certs, 0);
 
-  DEBUG_printf("1cupsGetCredentialsGetTrust: certs=%p, sk_X509_num(certs)=%d", (void *)certs, sk_X509_num(certs));
-
-  if (cg->any_root < 0)
+  if (!cg->client_conf_loaded)
   {
     _cupsSetDefaults();
 //    openssl_load_crl();
@@ -938,7 +1023,10 @@ cupsGetCredentialsTrust(
     time_t	curtime;		// Current date/time
 
     time(&curtime);
-    if (curtime < openssl_get_date(cert, 0) || curtime > openssl_get_date(cert, 1))
+
+    DEBUG_printf("1cupsGetCredentialsTrust: curtime=%ld, notBefore=%ld, notAfter=%ld", (long)curtime, (long)openssl_get_date(cert, 0), (long)openssl_get_date(cert, 1));
+
+    if ((curtime + 86400) < openssl_get_date(cert, 0) || curtime > openssl_get_date(cert, 1))
     {
       _cupsSetError(IPP_STATUS_ERROR_CUPS_PKI, _("Credentials have expired."), 1);
       trust = HTTP_TRUST_EXPIRED;
@@ -946,6 +1034,8 @@ cupsGetCredentialsTrust(
   }
 
   sk_X509_free(certs);
+
+  DEBUG_printf("1cupsGetCredentialsTrust: Returning %d.", trust);
 
   return (trust);
 }
@@ -1537,6 +1627,64 @@ _httpFreeCredentials(
 
 
 //
+// 'httpGetSecurity()' - Get the TLS version and cipher suite used by a connection.
+//
+// This function gets the TLS version and cipher suite being used by a
+// connection, if any.  The string is copied to "buffer" and is of the form
+// "TLS/major.minor CipherSuite".  If not encrypted, the buffer is cleared to
+// the empty string.
+//
+// @since CUPS 2.5@
+//
+
+const char *				// O - Security information or `NULL` if not encrypted
+httpGetSecurity(http_t *http,		// I - HTTP connection
+                char   *buffer,		// I - String buffer
+                size_t bufsize)		// I - Size of buffer
+{
+  const char	*cipherName;		// Cipher suite name
+
+
+  // Range check input...
+  if (buffer)
+    *buffer = '\0';
+
+  if (!http || !http->tls || !buffer || bufsize < 16)
+    return (NULL);
+
+  // Record the TLS version and cipher suite...
+  cipherName = SSL_get_cipher_name(http->tls);
+
+  switch (SSL_version(http->tls))
+  {
+    default :
+        snprintf(buffer, bufsize, "TLS/?.? %s", cipherName);
+        break;
+
+    case TLS1_VERSION :
+        snprintf(buffer, bufsize, "TLS/1.0 %s", cipherName);
+        break;
+
+    case TLS1_1_VERSION :
+        snprintf(buffer, bufsize, "TLS/1.1 %s", cipherName);
+        break;
+
+    case TLS1_2_VERSION :
+        snprintf(buffer, bufsize, "TLS/1.2 %s", cipherName);
+        break;
+
+#  ifdef TLS1_3_VERSION
+    case TLS1_3_VERSION :
+        snprintf(buffer, bufsize, "TLS/1.3 %s", cipherName);
+        break;
+#  endif // TLS1_3_VERSION
+  }
+
+  return (buffer);
+}
+
+
+//
 // '_httpTLSInitialize()' - Initialize the TLS stack.
 //
 
@@ -1589,6 +1737,7 @@ _httpTLSStart(http_t *http)		// I - Connection to server
   char		hostname[256],		// Hostname
 		cipherlist[256];	// List of cipher suites
   unsigned long	error;			// Error code, if any
+  _cups_globals_t *cg = _cupsGlobals();	// Per-thread globals
   static const uint16_t versions[] =	// SSL/TLS versions
   {
     TLS1_VERSION,			// No more SSL support in OpenSSL
@@ -1607,7 +1756,7 @@ _httpTLSStart(http_t *http)		// I - Connection to server
 
   DEBUG_printf("3_httpTLSStart(http=%p)", (void *)http);
 
-  if (tls_options < 0)
+  if (!cg->client_conf_loaded)
   {
     DEBUG_puts("4_httpTLSStart: Setting defaults.");
     _cupsSetDefaults();
@@ -1651,53 +1800,63 @@ _httpTLSStart(http_t *http)		// I - Connection to server
     // Negotiate a TLS connection as a server
     char	crtfile[1024],		// Certificate file
 		keyfile[1024];		// Private key file
-    const char	*cn,			// Common name to lookup
+    const char	*cn = NULL,		// Common name to lookup
 		*cnptr;			// Pointer into common name
     bool	have_creds = false;	// Have credentials?
 
     context = SSL_CTX_new(TLS_server_method());
 
     // Find the TLS certificate...
-    if (http->fields[HTTP_FIELD_HOST])
-    {
-      // Use hostname for TLS upgrade...
-      cupsCopyString(hostname, http->fields[HTTP_FIELD_HOST], sizeof(hostname));
-    }
-    else
-    {
-      // Resolve hostname from connection address...
-      http_addr_t	addr;		// Connection address
-      socklen_t		addrlen;	// Length of address
+    cupsMutexLock(&tls_mutex);
 
-      addrlen = sizeof(addr);
-      if (getsockname(http->fd, (struct sockaddr *)&addr, &addrlen))
+    if (!tls_common_name)
+    {
+      cupsMutexUnlock(&tls_mutex);
+
+      if (http->fields[HTTP_FIELD_HOST])
       {
-        // Unable to get local socket address so use default...
-	DEBUG_printf("4_httpTLSStart: Unable to get socket address: %s", strerror(errno));
-	hostname[0] = '\0';
-      }
-      else if (httpAddrIsLocalhost(&addr))
-      {
-        // Local access top use default...
-	hostname[0] = '\0';
+	// Use hostname for TLS upgrade...
+	cupsCopyString(hostname, http->fields[HTTP_FIELD_HOST], sizeof(hostname));
       }
       else
       {
-        // Lookup the socket address...
-	httpAddrLookup(&addr, hostname, sizeof(hostname));
-        DEBUG_printf("4_httpTLSStart: Resolved socket address to \"%s\".", hostname);
+	// Resolve hostname from connection address...
+	http_addr_t	addr;		// Connection address
+	socklen_t	addrlen;	// Length of address
+
+	addrlen = sizeof(addr);
+	if (getsockname(http->fd, (struct sockaddr *)&addr, &addrlen))
+	{
+	  // Unable to get local socket address so use default...
+	  DEBUG_printf("4_httpTLSStart: Unable to get socket address: %s", strerror(errno));
+	  hostname[0] = '\0';
+	}
+	else if (httpAddrIsLocalhost(&addr))
+	{
+	  // Local access top use default...
+	  hostname[0] = '\0';
+	}
+	else
+	{
+	  // Lookup the socket address...
+	  httpAddrLookup(&addr, hostname, sizeof(hostname));
+	  DEBUG_printf("4_httpTLSStart: Resolved socket address to \"%s\".", hostname);
+	}
       }
+
+      if (isdigit(hostname[0] & 255) || hostname[0] == '[')
+	hostname[0] = '\0';		// Don't allow numeric addresses
+
+      if (hostname[0])
+	cn = hostname;
+
+      cupsMutexLock(&tls_mutex);
     }
 
-    if (isdigit(hostname[0] & 255) || hostname[0] == '[')
-      hostname[0] = '\0';		// Don't allow numeric addresses
-
-    cupsMutexLock(&tls_mutex);
-
-    if (hostname[0])
-      cn = hostname;
-    else
+    if (!cn)
       cn = tls_common_name;
+
+    DEBUG_printf("4_httpTLSStart: Using common name \"%s\"...", cn);
 
     if (cn)
     {
@@ -1744,7 +1903,6 @@ _httpTLSStart(http_t *http)		// I - Connection to server
 	DEBUG_puts("4_httpTLSStart: cupsCreateCredentials failed.");
 	http->error  = errno = EINVAL;
 	http->status = HTTP_STATUS_ERROR;
-	_cupsSetError(IPP_STATUS_ERROR_INTERNAL, _("Unable to create server credentials."), 1);
 	SSL_CTX_free(context);
         cupsMutexUnlock(&tls_mutex);
 

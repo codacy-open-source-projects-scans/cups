@@ -1,12 +1,10 @@
 #
 # Documentation makefile for CUPS.
 #
-# Copyright © 2020-2024 by OpenPrinting.
-# Copyright © 2007-2019 by Apple Inc.
-# Copyright © 1997-2007 by Easy Software Products.
+# Copyright © 2020-2025 by OpenPrinting.
 #
 # Licensed under Apache License v2.0.  See the file "LICENSE" for more
-#s information.
+# information.
 #
 
 include ../Makedefs
@@ -19,7 +17,6 @@ WEBPAGES	=	\
 			apple-touch-icon.png \
 			cups.css \
 			cups-printable.css \
-			index.html \
 			robots.txt
 WEBIMAGES	=	\
 			images/cups.png \
@@ -51,10 +48,11 @@ HELPFILES	=	\
 			help/man-classes.conf.html \
 			help/man-client.conf.html \
 			help/man-cups.html \
-			help/man-cups-config.html \
 			help/man-cups-files.conf.html \
 			help/man-cups-lpd.html \
+			help/man-cups-oauth.html \
 			help/man-cups-snmp.html \
+			help/man-cups-x509.html \
 			help/man-cupsaccept.html \
 			help/man-cupsd.conf.html \
 			help/man-cupsd.html \
@@ -153,7 +151,7 @@ install:	all install-data install-headers install-libs install-exec
 # Install data files...
 #
 
-install-data: $(INSTALL_LANGUAGES)
+install-data:
 	$(INSTALL_DIR) -m 755 $(DOCDIR)
 	for file in $(WEBPAGES); do \
 		$(INSTALL_MAN) $$file $(DOCDIR); \
@@ -169,17 +167,6 @@ install-data: $(INSTALL_LANGUAGES)
 	for file in $(WEBIMAGES) $(HELPIMAGES); do \
 		$(INSTALL_MAN) $$file $(DOCDIR)/images; \
 	done
-
-install-languages:
-	for lang in $(LANGUAGES); do \
-		if test -d $$lang; then \
-			$(INSTALL_DIR) -m 755 $(DOCDIR)/$$lang; \
-			$(INSTALL_DATA) $$lang/index.html $(DOCDIR)/$$lang; \
-			$(INSTALL_DATA) $$lang/cups.css $(DOCDIR)/$$lang >/dev/null 2>&1 || true; \
-		fi; \
-	done
-
-install-langbundle:
 
 
 #
@@ -207,7 +194,7 @@ install-libs:
 # Uninstall all documentation files...
 #
 
-uninstall: $(UNINSTALL_LANGUAGES)
+uninstall:
 	for file in $(WEBPAGES); do \
 		$(RM) $(DOCDIR)/$$file; \
 	done
@@ -223,12 +210,3 @@ uninstall: $(UNINSTALL_LANGUAGES)
 	-$(RMDIR) $(DOCDIR)/images
 	-$(RMDIR) $(DOCDIR)/help
 	-$(RMDIR) $(DOCDIR)
-
-uninstall-languages:
-	-for lang in $(LANGUAGES); do \
-		$(RM) $(DOCDIR)/$$lang/index.html; \
-		$(RM) $(DOCDIR)/$$lang/cups.css; \
-		$(RMDIR) $(DOCDIR)/$$lang; \
-	done
-
-install-langbundle:

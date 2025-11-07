@@ -1,16 +1,12 @@
 /*
  * Log file routines for the CUPS scheduler.
  *
- * Copyright © 2020-2024 by OpenPrinting.
+ * Copyright © 2020-2025 by OpenPrinting.
  * Copyright © 2007-2018 by Apple Inc.
  * Copyright © 1997-2007 by Easy Software Products, all rights reserved.
  *
  * Licensed under Apache License v2.0.  See the file "LICENSE" for more
  * information.
- */
-
-/*
- * Include necessary headers...
  */
 
 #include "cupsd.h"
@@ -153,11 +149,12 @@ cupsdCheckLogFile(cups_file_t **lf,	/* IO - Log file */
       cupsConcatString(filename, "/", sizeof(filename));
     }
     else
+    {
       filename[0] = '\0';
+    }
 
-    for (logptr = logname, ptr = filename + strlen(filename);
-         *logptr && ptr < (filename + sizeof(filename) - 1);
-	 logptr ++)
+    for (logptr = logname, ptr = filename + strlen(filename); *logptr && ptr < (filename + sizeof(filename) - 1); logptr ++)
+    {
       if (*logptr == '%')
       {
        /*
@@ -171,7 +168,7 @@ cupsdCheckLogFile(cups_file_t **lf,	/* IO - Log file */
 	  * Insert the server name...
 	  */
 
-	  cupsCopyString(ptr, ServerName, sizeof(filename) - (size_t)(ptr - filename));
+	  cupsCopyString(ptr, ServerName ? ServerName : "localhost", sizeof(filename) - (size_t)(ptr - filename));
 	  ptr += strlen(ptr);
 	}
         else
@@ -184,7 +181,10 @@ cupsdCheckLogFile(cups_file_t **lf,	/* IO - Log file */
 	}
       }
       else
+      {
 	*ptr++ = *logptr;
+      }
+    }
 
     *ptr = '\0';
   }
@@ -1016,6 +1016,89 @@ cupsdLogPage(cupsd_job_t *job,		/* I - Job being printed */
   cupsFileFlush(PageFile);
 
   return (1);
+}
+
+
+/*
+ * 'cupsdLogPrinter()' - Log a printer message.
+ */
+
+int					/* O - 1 on success, 0 on error */
+cupsdLogPrinter(
+    cupsd_printer_t *p,			/* I - Printer */
+    int             level,		/* I - Log level */
+    const char      *message,		/* I - Printf-style message string */
+    ...)				/* I - Additional arguments as needed */
+{
+  va_list	ap, ap2;		/* Argument pointers */
+  char		pmsg[1024];		/* Format string for printer message */
+  int		status;			/* Formatting status */
+
+
+ /*
+  * See if we want to log this message...
+  */
+
+  if (TestConfigFile || !ErrorLog)
+    return (1);
+
+  if (level > LogLevel)
+    return (1);
+
+ /*
+  * Format and write the log message...
+  */
+
+  if (p)
+    snprintf(pmsg, sizeof(pmsg), "[Printer %s] %s", p->name, message);
+  else
+    cupsCopyString(pmsg, message, sizeof(pmsg));
+
+  va_start(ap, message);
+
+  do
+  {
+    va_copy(ap2, ap);
+    status = format_log_line(pmsg, ap2);
+    va_end(ap2);
+  }
+  while (status == 0);
+
+  va_end(ap);
+
+  if (status > 0)
+  {
+#ifdef HAVE_SYSTEMD_SD_JOURNAL_H
+    if (!strcmp(ErrorLog, "syslog"))
+    {
+      static const char * const printer_states[] =
+      {					/* printer-state strings */
+	"Idle",
+	"Processing",
+	"Stopped"
+      };
+
+      if (p)
+	sd_journal_send("MESSAGE=%s", log_line,
+			"PRIORITY=%i", log_levels[level],
+			PWG_Event"=PrinterStateChanged",
+			PWG_ServiceURI"=%s", p ? p->uri : "",
+			PWG_ServiceState"=%s", printer_states[p->state - IPP_PSTATE_IDLE],
+			NULL);
+      else
+	sd_journal_send("MESSAGE=%s", log_line,
+			"PRIORITY=%i", log_levels[level],
+			NULL);
+
+      return (1);
+    }
+    else
+#endif /* HAVE_SYSTEMD_SD_JOURNAL_H */
+
+    return (cupsdWriteErrorLog(level, log_line));
+  }
+  else
+    return (cupsdWriteErrorLog(CUPSD_LOG_ERROR, "Unable to allocate memory for log line."));
 }
 
 

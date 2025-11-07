@@ -93,8 +93,11 @@ AC_SUBST([PKGCONFIG_REQUIRES])
 
 dnl Check for libraries...
 AC_SEARCH_LIBS([abs], [m], [AC_DEFINE(HAVE_ABS)])
-AC_SEARCH_LIBS([crypt], [crypt])
 AC_SEARCH_LIBS([fmod], [m])
+
+PKGCONFIG_LIBS_STATIC="$LIBS"
+
+AC_SEARCH_LIBS([crypt], [crypt])
 AC_SEARCH_LIBS([getspent], [sec gen])
 
 LIBMALLOC=""
@@ -129,6 +132,7 @@ dnl Checks for header files.
 AC_CHECK_HEADER([langinfo.h], AC_DEFINE([HAVE_LANGINFO_H], [1], [Have <langinfo.h> header?]))
 AC_CHECK_HEADER([malloc.h], AC_DEFINE([HAVE_MALLOC_H], [1], [Have <malloc.h> header?]))
 AC_CHECK_HEADER([stdint.h], AC_DEFINE([HAVE_STDINT_H], [1], [Have <stdint.h> header?]))
+AC_CHECK_HEADER([sys/auxv.h], AC_DEFINE([HAVE_SYS_AUXV_H], [1], [Have <sys/auxv.h> header?]))
 AC_CHECK_HEADER([sys/ioctl.h], AC_DEFINE([HAVE_SYS_IOCTL_H], [1], [Have <sys/ioctl.h> header?]))
 AC_CHECK_HEADER([sys/param.h], AC_DEFINE([HAVE_SYS_PARAM_H], [1], [Have <sys/param.h> header?]))
 AC_CHECK_HEADER([sys/ucred.h], AC_DEFINE([HAVE_SYS_UCRED_H], [1], [Have <sys/ucred.h> header?]))
@@ -189,6 +193,11 @@ AC_COMPILE_IFELSE([
     AC_DEFINE([HAVE_TM_GMTOFF], [1], [Have tm_gmtoff member in struct tm?])
 ], [
     AC_MSG_RESULT([no])
+])
+
+dnl See if we have the timegm function...
+AC_CHECK_FUNC([timegm], [
+    AC_DEFINE([HAVE_TIMEGM], [1], [Do we have the timegm function?])
 ])
 
 dnl See if the stat structure has the st_gen member...

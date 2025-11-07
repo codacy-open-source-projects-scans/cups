@@ -2,10 +2,11 @@
  * Print job definitions for the CUPS scheduler.
  *
  * Copyright © 2020-2024 by OpenPrinting.
- * Copyright 2007-2015 by Apple Inc.
- * Copyright 1997-2007 by Easy Software Products, all rights reserved.
+ * Copyright © 2007-2015 by Apple Inc.
+ * Copyright © 1997-2007 by Easy Software Products, all rights reserved.
  *
- * Licensed under Apache License v2.0.  See the file "LICENSE" for more information.
+ * Licensed under Apache License v2.0.  See the file "LICENSE" for more
+ * information.
  */
 
 /*
@@ -75,7 +76,8 @@ struct cupsd_job_s			/**** Job request ****/
   int			status;		/* Status code from filters */
   int			tries;		/* Number of tries for this job */
   int			completed;	/* cups-waiting-for-job-completed seen */
-  int			retry_as_raster;/* Need to retry the job as raster */
+  int			print_as_raster;
+					/* Need to print the job as raster */
   char			*auth_env[3],	/* AUTH_xxx environment variables,
                                          * if any */
 			*auth_uid;	/* AUTH_UID environment variable */

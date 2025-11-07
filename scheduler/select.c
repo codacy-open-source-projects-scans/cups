@@ -1,7 +1,7 @@
 //
 // Select abstraction functions for the CUPS scheduler.
 //
-// Copyright © 2020-2024 by OpenPrinting.
+// Copyright © 2020-2025 by OpenPrinting.
 // Copyright © 2007-2016 by Apple Inc.
 // Copyright © 2006-2007 by Easy Software Products.
 //
@@ -185,12 +185,12 @@ static struct pollfd	*cupsd_pollfds = NULL;
 //
 
 static int	compare_fds(_cupsd_fd_t *a, _cupsd_fd_t *b, void *data);
-static _cupsd_fd_t	*find_fd(int fd);
-#define			release_fd(f) { \
-			  (f)->use --; \
-			  if (!(f)->use) free((f));\
-			}
-#define			retain_fd(f) (f)->use++
+static _cupsd_fd_t *find_fd(int fd);
+#define		release_fd(f) { \
+		  (f)->use --; \
+		  if (!(f)->use) free((f));\
+		}
+#define		retain_fd(f) (f)->use++
 
 
 //
@@ -301,7 +301,7 @@ cupsdDoSelect(long timeout)		// I - Timeout in seconds
   else
     nfds = poll(cupsd_pollfds, (nfds_t)count, -1);
 
-  cupsdLogMessage(CUPSD_LOG_DEBUG, "poll(nfds=%d, timeout=%ld) returned %d", count, timeout < 86400 ? timeout * 1000 : -1, nfds);
+  cupsdLogMessage(CUPSD_LOG_DEBUG2, "poll(nfds=%d, timeout=%ld) returned %d", count, timeout < 86400 ? timeout * 1000 : -1, nfds);
 
   if (nfds > 0)
   {
@@ -313,11 +313,11 @@ cupsdDoSelect(long timeout)		// I - Timeout in seconds
 
       if ((fdptr = find_fd(pfd->fd)) == NULL)
       {
-        cupsdLogMessage(CUPSD_LOG_DEBUG, "cups_pollfds[%d] not found", pfd->fd);
+        cupsdLogMessage(CUPSD_LOG_DEBUG2, "cups_pollfds[%d] not found", pfd->fd);
         continue;
       }
 
-      cupsdLogMessage(CUPSD_LOG_DEBUG, "cups_pollfds[%d].revents=%d", pfd->fd, pfd->revents);
+      cupsdLogMessage(CUPSD_LOG_DEBUG2, "cups_pollfds[%d].revents=%d", pfd->fd, pfd->revents);
 
       retain_fd(fdptr);
 

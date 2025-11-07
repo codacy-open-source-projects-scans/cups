@@ -1,7 +1,7 @@
 /*
  * Printer routines for the CUPS scheduler.
  *
- * Copyright © 2020-2024 by OpenPrinting
+ * Copyright © 2020-2025 by OpenPrinting
  * Copyright © 2007-2019 by Apple Inc.
  * Copyright © 1997-2007 by Easy Software Products, all rights reserved.
  *
@@ -112,12 +112,15 @@ cupsdAddPrinter(const char *name)	/* I - Name of printer */
   * Insert the printer in the printer list alphabetically...
   */
 
+  cupsRWLockWrite(&PrintersLock);
+
   if (!Printers)
     Printers = cupsArrayNew(compare_printers, NULL);
 
-  cupsdLogMessage(CUPSD_LOG_DEBUG2,
-                  "cupsdAddPrinter: Adding %s to Printers", p->name);
+  cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdAddPrinter: Adding %s to Printers", p->name);
   cupsArrayAdd(Printers, p);
+
+  cupsRWUnlock(&PrintersLock);
 
  /*
   * Return the new printer...
@@ -465,7 +468,7 @@ cupsdCreateCommonData(void)
 
     if (attr == NULL)
     {
-      cupsdLogMessage(CUPSD_LOG_EMERG, "Unable to allocate memory for job-sheets-supported attribute: %s!", strerror(errno));
+      cupsdLogMessage(CUPSD_LOG_EMERG, "Unable to allocate memory for job-sheets-supported attribute: %s", strerror(errno));
     }
     else if (!Classification || ClassifyOverride)
     {
@@ -574,6 +577,9 @@ cupsdCreateCommonData(void)
 
   /* pdl-override-supported */
   ippAddString(CommonData, IPP_TAG_PRINTER, IPP_CONST_TAG(IPP_TAG_KEYWORD), "pdl-override-supported", NULL, "attempted");
+
+  /* print-as-raster-supported */
+  ippAddBoolean(CommonData, IPP_TAG_PRINTER, "print-as-raster-supported", 1);
 
   /* print-scaling-supported */
   ippAddStrings(CommonData, IPP_TAG_PRINTER, IPP_CONST_TAG(IPP_TAG_KEYWORD), "print-scaling-supported", sizeof(print_scaling) / sizeof(print_scaling[0]), NULL, print_scaling);
@@ -821,11 +827,18 @@ cupsdDeleteTemporaryPrinters(int force) /* I - Force deletion instead of auto? *
 cupsd_printer_t *			/* O - Destination in list */
 cupsdFindDest(const char *name)		/* I - Name of printer or class to find */
 {
-  cupsd_printer_t	key;		/* Search key */
+  cupsd_printer_t	key,		/* Search key */
+			*match;		/* Match */
 
+
+  cupsRWLockRead(&PrintersLock);
 
   key.name = (char *)name;
-  return ((cupsd_printer_t *)cupsArrayFind(Printers, &key));
+  match    = (cupsd_printer_t *)cupsArrayFind(Printers, &key);
+
+  cupsRWUnlock(&PrintersLock);
+
+  return (match);
 }
 
 
@@ -860,8 +873,9 @@ cupsdLoadAllPrinters(void)
 			*value,		/* Pointer to value */
 			*valueptr;	/* Pointer into value */
   cupsd_printer_t	*p;		/* Current printer */
-  int			found_raw = 0;		/* Flag whether raw queue is installed */
-  int			found_driver = 0;		/* Flag whether queue with classic driver is installed */
+  int			found_raw = 0;	/* Flag whether raw queue is installed */
+  int			found_driver = 0;
+  					/* Flag whether queue with classic driver is installed */
 
 
  /*
@@ -961,7 +975,7 @@ cupsdLoadAllPrinters(void)
 	  }
 	}
 
-        if (strncmp(p->device_uri, "file:", 5) && p->state != IPP_PSTATE_STOPPED)
+        if (p->device_uri && strncmp(p->device_uri, "file:", 5) && p->state != IPP_PSTATE_STOPPED)
 	{
 	 /*
           * See if the backend exists...
@@ -1374,8 +1388,9 @@ cupsdRenamePrinter(
   * Remove the printer from the array(s) first...
   */
 
-  cupsdLogMessage(CUPSD_LOG_DEBUG2,
-                  "cupsdRenamePrinter: Removing %s from Printers", p->name);
+  cupsRWLockWrite(&PrintersLock);
+
+  cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdRenamePrinter: Removing %s from Printers", p->name);
   cupsArrayRemove(Printers, p);
 
  /*
@@ -1411,9 +1426,10 @@ cupsdRenamePrinter(
   * Add the printer back to the printer array(s)...
   */
 
-  cupsdLogMessage(CUPSD_LOG_DEBUG2,
-                  "cupsdRenamePrinter: Adding %s to Printers", p->name);
+  cupsdLogMessage(CUPSD_LOG_DEBUG2, "cupsdRenamePrinter: Adding %s to Printers", p->name);
   cupsArrayAdd(Printers, p);
+
+  cupsRWUnlock(&PrintersLock);
 }
 
 
@@ -1425,7 +1441,8 @@ cupsdRenamePrinter(
 void
 cupsdSaveAllPrinters(void)
 {
-  int			i;		/* Looping var */
+  int			i, j,		/* Looping vars */
+			pcount;		/* Number of printers */
   cups_file_t		*fp;		/* printers.conf file */
   char			filename[1024],	/* printers.conf filename */
 			value[2048],	/* Value string */
@@ -1461,13 +1478,15 @@ cupsdSaveAllPrinters(void)
   * Write each local printer known to the system...
   */
 
-  for (printer = (cupsd_printer_t *)cupsArrayFirst(Printers);
-       printer;
-       printer = (cupsd_printer_t *)cupsArrayNext(Printers))
+  cupsRWLockRead(&PrintersLock);
+
+  for (i = 0, pcount = cupsArrayGetCount(Printers); i < pcount; i ++)
   {
    /*
     * Skip printer classes and temporary queues...
     */
+
+    printer = (cupsd_printer_t *)cupsArrayGetElement(Printers, i);
 
     if ((printer->type & CUPS_PTYPE_CLASS) || printer->temporary)
       continue;
@@ -1548,11 +1567,11 @@ cupsdSaveAllPrinters(void)
     cupsFilePrintf(fp, "StateTime %d\n", (int)printer->state_time);
     cupsFilePrintf(fp, "ConfigTime %d\n", (int)printer->config_time);
 
-    for (i = 0; i < printer->num_reasons; i ++)
-      if (strcmp(printer->reasons[i], "connecting-to-device") &&
-          strcmp(printer->reasons[i], "cups-insecure-filter-warning") &&
-          strcmp(printer->reasons[i], "cups-missing-filter-warning"))
-        cupsFilePutConf(fp, "Reason", printer->reasons[i]);
+    for (j = 0; j < printer->num_reasons; j ++)
+      if (strcmp(printer->reasons[j], "connecting-to-device") &&
+          strcmp(printer->reasons[j], "cups-insecure-filter-warning") &&
+          strcmp(printer->reasons[j], "cups-missing-filter-warning"))
+        cupsFilePutConf(fp, "Reason", printer->reasons[j]);
 
     cupsFilePrintf(fp, "Type %d\n", printer->type);
 
@@ -1584,9 +1603,9 @@ cupsdSaveAllPrinters(void)
     if (printer->error_policy)
       cupsFilePutConf(fp, "ErrorPolicy", printer->error_policy);
 
-    for (i = printer->num_options, option = printer->options;
-         i > 0;
-	 i --, option ++)
+    for (j = printer->num_options, option = printer->options;
+         j > 0;
+	 j --, option ++)
     {
       snprintf(value, sizeof(value), "%s %s", option->name, option->value);
       cupsFilePutConf(fp, "Option", value);
@@ -1597,14 +1616,14 @@ cupsdSaveAllPrinters(void)
     {
       snprintf(value, sizeof(value), "%s ", marker->name);
 
-      for (i = 0, ptr = value + strlen(value);
-           i < marker->num_values && ptr < (value + sizeof(value) - 1);
-	   i ++)
+      for (j = 0, ptr = value + strlen(value);
+           j < marker->num_values && ptr < (value + sizeof(value) - 1);
+	   j ++)
       {
-        if (i)
+        if (j)
 	  *ptr++ = ',';
 
-        cupsCopyString(ptr, marker->values[i].string.text, (size_t)(value + sizeof(value) - ptr));
+        cupsCopyString(ptr, marker->values[j].string.text, (size_t)(value + sizeof(value) - ptr));
         ptr += strlen(ptr);
       }
 
@@ -1617,8 +1636,8 @@ cupsdSaveAllPrinters(void)
     {
       cupsFilePrintf(fp, "Attribute %s %d", marker->name,
                      marker->values[0].integer);
-      for (i = 1; i < marker->num_values; i ++)
-        cupsFilePrintf(fp, ",%d", marker->values[i].integer);
+      for (j = 1; j < marker->num_values; j ++)
+        cupsFilePrintf(fp, ",%d", marker->values[j].integer);
       cupsFilePuts(fp, "\n");
     }
 
@@ -1627,8 +1646,8 @@ cupsdSaveAllPrinters(void)
     {
       cupsFilePrintf(fp, "Attribute %s %d", marker->name,
                      marker->values[0].integer);
-      for (i = 1; i < marker->num_values; i ++)
-        cupsFilePrintf(fp, ",%d", marker->values[i].integer);
+      for (j = 1; j < marker->num_values; j ++)
+        cupsFilePrintf(fp, ",%d", marker->values[j].integer);
       cupsFilePuts(fp, "\n");
     }
 
@@ -1637,8 +1656,8 @@ cupsdSaveAllPrinters(void)
     {
       cupsFilePrintf(fp, "Attribute %s %d", marker->name,
                      marker->values[0].integer);
-      for (i = 1; i < marker->num_values; i ++)
-        cupsFilePrintf(fp, ",%d", marker->values[i].integer);
+      for (j = 1; j < marker->num_values; j ++)
+        cupsFilePrintf(fp, ",%d", marker->values[j].integer);
       cupsFilePuts(fp, "\n");
     }
 
@@ -1656,14 +1675,14 @@ cupsdSaveAllPrinters(void)
     {
       snprintf(value, sizeof(value), "%s ", marker->name);
 
-      for (i = 0, ptr = value + strlen(value);
-           i < marker->num_values && ptr < (value + sizeof(value) - 1);
-	   i ++)
+      for (j = 0, ptr = value + strlen(value);
+           j < marker->num_values && ptr < (value + sizeof(value) - 1);
+	   j ++)
       {
-        if (i)
+        if (j)
 	  *ptr++ = ',';
 
-        cupsCopyString(ptr, marker->values[i].string.text, (size_t)(value + sizeof(value) - ptr));
+        cupsCopyString(ptr, marker->values[j].string.text, (size_t)(value + sizeof(value) - ptr));
         ptr += strlen(ptr);
       }
 
@@ -1676,14 +1695,14 @@ cupsdSaveAllPrinters(void)
     {
       snprintf(value, sizeof(value), "%s ", marker->name);
 
-      for (i = 0, ptr = value + strlen(value);
-           i < marker->num_values && ptr < (value + sizeof(value) - 1);
-	   i ++)
+      for (j = 0, ptr = value + strlen(value);
+           j < marker->num_values && ptr < (value + sizeof(value) - 1);
+	   j ++)
       {
-        if (i)
+        if (j)
 	  *ptr++ = ',';
 
-        cupsCopyString(ptr, marker->values[i].string.text, (size_t)(value + sizeof(value) - ptr));
+        cupsCopyString(ptr, marker->values[j].string.text, (size_t)(value + sizeof(value) - ptr));
         ptr += strlen(ptr);
       }
 
@@ -1700,6 +1719,8 @@ cupsdSaveAllPrinters(void)
     else
       cupsFilePuts(fp, "</Printer>\n");
   }
+
+  cupsRWUnlock(&PrintersLock);
 
   cupsdCloseCreatedConfFile(fp, filename);
 }
@@ -1962,7 +1983,7 @@ cupsdSetPrinterAttr(
 
   if (!*value && strcmp(name, "marker-message"))
   {
-    cupsdLogMessage(CUPSD_LOG_ERROR, "Ignoring empty \"%s\" attribute", name);
+    cupsdLogPrinter(p, CUPSD_LOG_ERROR, "Ignoring empty \"%s\" attribute", name);
     return;
   }
 
@@ -1972,8 +1993,7 @@ cupsdSetPrinterAttr(
 
   if ((temp = strdup(value)) == NULL)
   {
-    cupsdLogMessage(CUPSD_LOG_ERROR,
-                    "Unable to duplicate value for \"%s\" attribute.", name);
+    cupsdLogPrinter(p, CUPSD_LOG_ERROR, "Unable to duplicate value for \"%s\" attribute.", name);
     return;
   }
 
@@ -2024,9 +2044,7 @@ cupsdSetPrinterAttr(
     if (!attr)
     {
       free(temp);
-      cupsdLogMessage(CUPSD_LOG_ERROR,
-                      "Unable to allocate memory for printer attribute "
-		      "(%d values)", count);
+      cupsdLogPrinter(p, CUPSD_LOG_ERROR, "Unable to allocate memory for printer attribute (%d values)", count);
       return;
     }
 
@@ -2075,9 +2093,7 @@ cupsdSetPrinterAttr(
     if (!attr)
     {
       free(temp);
-      cupsdLogMessage(CUPSD_LOG_ERROR,
-                      "Unable to allocate memory for printer attribute "
-		      "(%d values)", count);
+      cupsdLogPrinter(p, CUPSD_LOG_ERROR, "Unable to allocate memory for printer attribute (%d values)", count);
       return;
     }
 
@@ -2665,9 +2681,7 @@ cupsdSetPrinterReasons(
       {
         if (i >= (int)(sizeof(p->reasons) / sizeof(p->reasons[0])))
 	{
-	  cupsdLogMessage(CUPSD_LOG_ALERT,
-	                  "Too many printer-state-reasons values for %s (%d)",
-			  p->name, i + 1);
+	  cupsdLogPrinter(p, CUPSD_LOG_ALERT, "Too many printer-state-reasons values (%d)", i + 1);
           return (changed);
         }
 
@@ -2811,48 +2825,30 @@ cupsdUpdatePrinterPPD(
   int		i;			/* Looping var */
   cups_file_t	*src,			/* Original file */
 		*dst;			/* New file */
-  char		srcfile[1024],		/* Original filename */
-		dstfile[1024],		/* New filename */
+  char		filename[1024],		/* PPD filename */
 		line[1024],		/* Line from file */
 		keystring[41];		/* Keyword from line */
   cups_option_t	*keyword;		/* Current keyword */
 
 
-  cupsdLogMessage(CUPSD_LOG_INFO, "Updating keywords in PPD file for %s...",
-                  p->name);
+  cupsdLogPrinter(p, CUPSD_LOG_INFO, "Updating keywords in PPD file.");
 
  /*
-  * Get the old and new PPD filenames...
+  * Get the base PPD filename...
   */
 
-  snprintf(srcfile, sizeof(srcfile), "%s/ppd/%s.ppd.O", ServerRoot, p->name);
-  snprintf(dstfile, sizeof(srcfile), "%s/ppd/%s.ppd", ServerRoot, p->name);
+  snprintf(filename, sizeof(filename), "%s/ppd/%s.ppd", ServerRoot, p->name);
 
  /*
-  * Rename the old file and open the old and new...
+  * Open the old and new PPDs...
   */
 
-  if (rename(dstfile, srcfile))
-  {
-    cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to backup PPD file for %s: %s",
-                    p->name, strerror(errno));
+  if ((src = cupsdOpenConfFile(filename)) == NULL)
     return (0);
-  }
 
-  if ((src = cupsFileOpen(srcfile, "r")) == NULL)
+  if ((dst = cupsdCreateConfFile(filename, ConfigFilePerm)) == NULL)
   {
-    cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to open PPD file \"%s\": %s",
-                    srcfile, strerror(errno));
-    rename(srcfile, dstfile);
-    return (0);
-  }
-
-  if ((dst = cupsFileOpen(dstfile, "w")) == NULL)
-  {
-    cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to create PPD file \"%s\": %s",
-                    dstfile, strerror(errno));
     cupsFileClose(src);
-    rename(srcfile, dstfile);
     return (0);
   }
 
@@ -2862,11 +2858,9 @@ cupsdUpdatePrinterPPD(
 
   if (!cupsFileGets(src, line, sizeof(line)))
   {
-    cupsdLogMessage(CUPSD_LOG_ERROR, "Unable to read PPD file \"%s\": %s",
-                    srcfile, strerror(errno));
+    cupsdLogPrinter(p, CUPSD_LOG_ERROR, "Unable to read PPD file \"%s\": %s", filename, strerror(errno));
     cupsFileClose(src);
     cupsFileClose(dst);
-    rename(srcfile, dstfile);
     return (0);
   }
 
@@ -2874,7 +2868,7 @@ cupsdUpdatePrinterPPD(
 
   for (i = num_keywords, keyword = keywords; i > 0; i --, keyword ++)
   {
-    cupsdLogMessage(CUPSD_LOG_DEBUG, "*%s: %s", keyword->name, keyword->value);
+    cupsdLogPrinter(p, CUPSD_LOG_DEBUG, "*%s: %s", keyword->name, keyword->value);
     cupsFilePrintf(dst, "*%s: %s\n", keyword->name, keyword->value);
   }
 
@@ -2904,7 +2898,7 @@ cupsdUpdatePrinterPPD(
   */
 
   cupsFileClose(src);
-  cupsFileClose(dst);
+  cupsdCloseCreatedConfFile(dst, filename);
 
   return (1);
 }
@@ -3117,7 +3111,7 @@ cupsdWritePrintcap(void)
   if (!Printcap || !*Printcap)
     return;
 
-  cupsdLogMessage(CUPSD_LOG_INFO, "Generating printcap %s...", Printcap);
+  cupsdLogMessage(CUPSD_LOG_INFO, "Generating printcap \"%s\".", Printcap);
 
  /*
   * Open the printcap file...
@@ -3445,8 +3439,7 @@ add_printer_filter(
     }
     else
     {
-      cupsdLogMessage(CUPSD_LOG_ERROR, "%s: invalid filter string \"%s\"!",
-                      p->name, filter);
+      cupsdLogPrinter(p, CUPSD_LOG_ERROR, "Invalid filter string \"%s\".", filter);
       return;
     }
   }
@@ -3459,8 +3452,7 @@ add_printer_filter(
 
     if (*ptr != ')')
     {
-      cupsdLogMessage(CUPSD_LOG_ERROR, "%s: invalid filter string \"%s\"!",
-                      p->name, filter);
+      cupsdLogPrinter(p, CUPSD_LOG_ERROR, "Invalid filter string \"%s\".", filter);
       return;
     }
 
@@ -3500,30 +3492,19 @@ add_printer_filter(
     {
       if (desttype != filtertype)
       {
-        cupsdLogMessage(CUPSD_LOG_DEBUG2,
-		        "add_printer_filter: %s: adding filter %s/%s %s/%s %d "
-		        "%s", p->name, temptype->super, temptype->type,
-		        desttype->super, desttype->type,
-		        cost, program);
+        cupsdLogPrinter(p, CUPSD_LOG_DEBUG2, "add_printer_filter: Adding filter %s/%s %s/%s %d %s", temptype->super, temptype->type, desttype->super, desttype->type, cost, program);
         filterptr = mimeAddFilter(MimeDatabase, temptype, desttype, cost,
 	                          program);
 
         if (!mimeFilterLookup(MimeDatabase, desttype, filtertype))
         {
-          cupsdLogMessage(CUPSD_LOG_DEBUG2,
-	                  "add_printer_filter: %s: adding filter %s/%s %s/%s "
-	                  "0 -", p->name, desttype->super, desttype->type,
-		          filtertype->super, filtertype->type);
+          cupsdLogPrinter(p, CUPSD_LOG_DEBUG2, "add_printer_filter: Adding filter %s/%s %s/%s 0 -", desttype->super, desttype->type, filtertype->super, filtertype->type);
           mimeAddFilter(MimeDatabase, desttype, filtertype, 0, "-");
         }
       }
       else
       {
-        cupsdLogMessage(CUPSD_LOG_DEBUG2,
-		        "add_printer_filter: %s: adding filter %s/%s %s/%s %d "
-		        "%s", p->name, temptype->super, temptype->type,
-		        filtertype->super, filtertype->type,
-		        cost, program);
+        cupsdLogPrinter(p, CUPSD_LOG_DEBUG2, "add_printer_filter: Adding filter %s/%s %s/%s %d %s", temptype->super, temptype->type, filtertype->super, filtertype->type, cost, program);
         filterptr = mimeAddFilter(MimeDatabase, temptype, filtertype, cost,
 	                          program);
       }
@@ -3572,8 +3553,7 @@ add_printer_formats(cupsd_printer_t *p)	/* I - Printer */
   * are filters for them...
   */
 
-  cupsdLogMessage(CUPSD_LOG_DEBUG2, "add_printer_formats: %d types, %d filters",
-                  mimeNumTypes(MimeDatabase), mimeNumFilters(MimeDatabase));
+  cupsdLogPrinter(p, CUPSD_LOG_DEBUG2, "add_printer_formats: %d types, %d filters", mimeNumTypes(MimeDatabase), mimeNumFilters(MimeDatabase));
 
   p->filetypes = cupsArrayNew(NULL, NULL);
 
@@ -3588,9 +3568,7 @@ add_printer_formats(cupsd_printer_t *p)	/* I - Printer */
 
     if ((filters = mimeFilter(MimeDatabase, type, p->filetype, NULL)) != NULL)
     {
-      cupsdLogMessage(CUPSD_LOG_DEBUG2,
-                      "add_printer_formats: %s: %s needs %d filters",
-                      p->name, mimetype, cupsArrayCount(filters));
+      cupsdLogPrinter(p, CUPSD_LOG_DEBUG2, "add_printer_formats: %s needs %d filters", mimetype, cupsArrayCount(filters));
 
       cupsArrayDelete(filters);
       cupsArrayAdd(p->filetypes, type);
@@ -3599,9 +3577,7 @@ add_printer_formats(cupsd_printer_t *p)	/* I - Printer */
         preferred = "application/pdf";
     }
     else
-      cupsdLogMessage(CUPSD_LOG_DEBUG2,
-                      "add_printer_formats: %s: %s not supported",
-                      p->name, mimetype);
+      cupsdLogPrinter(p, CUPSD_LOG_DEBUG2, "add_printer_formats: %s not supported", mimetype);
   }
 
  /*
@@ -3614,9 +3590,7 @@ add_printer_formats(cupsd_printer_t *p)	/* I - Printer */
   else
     i = 0;
 
-  cupsdLogMessage(CUPSD_LOG_DEBUG2,
-                  "add_printer_formats: %s: %d supported types",
-                  p->name, cupsArrayCount(p->filetypes) + i);
+  cupsdLogPrinter(p, CUPSD_LOG_DEBUG2, "add_printer_formats: %d supported types", cupsArrayCount(p->filetypes) + i);
 
   attr = ippAddStrings(p->attrs, IPP_TAG_PRINTER, IPP_TAG_MIMETYPE,
                        "document-format-supported",
@@ -3676,7 +3650,7 @@ add_printer_formats(cupsd_printer_t *p)	/* I - Printer */
   if (pdl[0])
     pdl[strlen(pdl) - 1] = '\0';	/* Remove trailing comma */
 
-  cupsdLogMessage(CUPSD_LOG_DEBUG, "%s: pdl='%s'", p->name, pdl);
+  cupsdLogPrinter(p, CUPSD_LOG_DEBUG, "pdl='%s'", pdl);
 
   cupsdSetString(&p->pdl, pdl);
 }
@@ -3931,7 +3905,7 @@ load_ppd(cupsd_printer_t *p)		/* I - Printer */
 
   if (cache_info.st_mtime >= ppd_info.st_mtime && cache_info.st_mtime >= conf_info.st_mtime && cache_info.st_mtime >= files_info.st_mtime)
   {
-    cupsdLogMessage(CUPSD_LOG_DEBUG, "load_ppd: Loading %s...", cache_name);
+    cupsdLogPrinter(p, CUPSD_LOG_DEBUG, "Loading PPD cache \"%s\".", cache_name);
 
     if ((p->pc = _ppdCacheCreateWithFile(cache_name, &p->ppd_attrs)) != NULL &&
         p->ppd_attrs)
@@ -3950,7 +3924,7 @@ load_ppd(cupsd_printer_t *p)		/* I - Printer */
 
   cupsdMarkDirty(CUPSD_DIRTY_PRINTERS);
 
-  cupsdLogMessage(CUPSD_LOG_DEBUG, "load_ppd: Loading %s...", ppd_name);
+  cupsdLogPrinter(p, CUPSD_LOG_DEBUG, "Loading PPD file \"%s\".", ppd_name);
 
   cupsdClearString(&(p->make_model));
 
@@ -4042,7 +4016,7 @@ load_ppd(cupsd_printer_t *p)		/* I - Printer */
     p->pc = _ppdCacheCreateWithPPD(Languages, ppd);
 
     if (!p->pc)
-      cupsdLogMessage(CUPSD_LOG_WARN, "Unable to create cache of \"%s\": %s", ppd_name, cupsGetErrorString());
+      cupsdLogPrinter(p, CUPSD_LOG_WARN, "Unable to create cache of \"%s\": %s", ppd_name, cupsGetErrorString());
 
     cupsdMarkDirty(CUPSD_DIRTY_STRINGS);
 
@@ -4312,9 +4286,7 @@ load_ppd(cupsd_printer_t *p)		/* I - Printer */
     if (ppd->num_sizes == 0 || !p->pc)
     {
       if (!ppdFindAttr(ppd, "APScannerOnly", NULL) && !ppdFindAttr(ppd, "cups3D", NULL))
-	cupsdLogMessage(CUPSD_LOG_CRIT,
-			"The PPD file for printer %s contains no media "
-			"options and is therefore invalid.", p->name);
+	cupsdLogPrinter(p, CUPSD_LOG_CRIT, "The PPD file contains no media options and is therefore invalid.");
 
       ippAddString(p->ppd_attrs, IPP_TAG_PRINTER, IPP_TAG_KEYWORD,
 		   "media-default", NULL, "unknown");
@@ -4328,7 +4300,7 @@ load_ppd(cupsd_printer_t *p)		/* I - Printer */
       */
 
       if ((size = ppdPageSize(ppd, NULL)) != NULL)
-        pwgsize = _ppdCacheGetSize(p->pc, size->name);
+	pwgsize = _ppdCacheGetSize(p->pc, size->name, size);
       else
         pwgsize = NULL;
 
@@ -4799,9 +4771,7 @@ load_ppd(cupsd_printer_t *p)		/* I - Printer */
 
 	if (xdpi <= 0 || ydpi <= 0)
 	{
-	  cupsdLogMessage(CUPSD_LOG_WARN,
-	                  "Bad resolution \"%s\" for printer %s.",
-			  choice->choice, p->name);
+	  cupsdLogPrinter(p, CUPSD_LOG_WARN, "Bad resolution \"%s\".", choice->choice);
 	  xdpi = ydpi = 300;
 	}
 
@@ -4842,9 +4812,7 @@ load_ppd(cupsd_printer_t *p)		/* I - Printer */
 
 	if (xdpi <= 0 || ydpi <= 0)
 	{
-	  cupsdLogMessage(CUPSD_LOG_WARN,
-			  "Bad default resolution \"%s\" for printer %s.",
-			  ppd_attr->value, p->name);
+	  cupsdLogPrinter(p, CUPSD_LOG_WARN, "Bad default resolution \"%s\".", ppd_attr->value);
 	  xdpi = ydpi = 300;
 	}
       }
@@ -5317,16 +5285,12 @@ load_ppd(cupsd_printer_t *p)		/* I - Printer */
 
     pstatus = ppdLastError(&pline);
 
-    cupsdLogMessage(CUPSD_LOG_ERROR, "PPD file for %s cannot be loaded.", p->name);
-
     if (pstatus <= PPD_ALLOC_ERROR)
-      cupsdLogMessage(CUPSD_LOG_ERROR, "%s: %s", ppd_name, strerror(errno));
+      cupsdLogPrinter(p, CUPSD_LOG_ERROR, "PPD file \"%s\" cannot be loaded: %s", ppd_name, strerror(errno));
     else
-      cupsdLogMessage(CUPSD_LOG_ERROR, "%s on line %d of %s.", ppdErrorString(pstatus), pline, ppd_name);
+      cupsdLogPrinter(p, CUPSD_LOG_ERROR, "PPD file \"%s\" cannot be loaded: %s on line %d.", ppd_name, ppdErrorString(pstatus), pline);
 
-    cupsdLogMessage(CUPSD_LOG_INFO,
-		    "Hint: Run \"cupstestppd %s\" and fix any errors.",
-		    ppd_name);
+    cupsdLogPrinter(p, CUPSD_LOG_INFO, "Hint: Run \"cupstestppd %s\" and fix any errors.", ppd_name);
   }
   else
   {
@@ -5383,7 +5347,7 @@ load_ppd(cupsd_printer_t *p)		/* I - Printer */
     * Save cached PPD attributes to disk...
     */
 
-    cupsdLogMessage(CUPSD_LOG_DEBUG, "load_ppd: Saving %s...", cache_name);
+    cupsdLogPrinter(p, CUPSD_LOG_DEBUG, "Saving PPD cache \"%s\".", cache_name);
 
     _ppdCacheWriteFile(p->pc, cache_name, p->ppd_attrs);
   }

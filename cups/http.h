@@ -1,7 +1,7 @@
 //
 // Hyper-Text Transport Protocol definitions for CUPS.
 //
-// Copyright © 2020-2024 by OpenPrinting.
+// Copyright © 2020-2025 by OpenPrinting.
 // Copyright © 2007-2018 by Apple Inc.
 // Copyright © 1997-2007 by Easy Software Products, all rights reserved.
 //
@@ -438,6 +438,7 @@ extern char		*httpGetAuthString(http_t *http) _CUPS_PUBLIC;
 extern int		httpGetBlocking(http_t *http) _CUPS_PUBLIC;
 extern const char	*httpGetContentEncoding(http_t *http) _CUPS_PUBLIC;
 extern const char	*httpGetCookie(http_t *http) _CUPS_PUBLIC;
+extern char		*httpGetCookieValue(http_t *http, const char *name, char *buffer, size_t bufsize) _CUPS_PUBLIC;
 extern const char	*httpGetDateString(time_t t) _CUPS_PUBLIC;
 extern const char	*httpGetDateString2(time_t t, char *s, int slen) _CUPS_PUBLIC;
 extern time_t		httpGetDateTime(const char *s) _CUPS_PUBLIC;
@@ -454,6 +455,7 @@ extern off_t		httpGetLength2(http_t *http) _CUPS_PUBLIC;
 extern size_t		httpGetPending(http_t *http) _CUPS_PUBLIC;
 extern size_t		httpGetReady(http_t *http) _CUPS_PUBLIC;
 extern size_t		httpGetRemaining(http_t *http) _CUPS_PUBLIC;
+extern const char	*httpGetSecurity(http_t *http, char *buffer, size_t bufsize) _CUPS_PUBLIC;
 extern http_state_t	httpGetState(http_t *http) _CUPS_PUBLIC;
 extern http_status_t	httpGetStatus(http_t *http) _CUPS_PUBLIC;
 extern char		*httpGetSubField(http_t *http, http_field_t field, const char *name, char *value) _CUPS_DEPRECATED_MSG("Use httpGetSubField2 instead.");
@@ -496,8 +498,7 @@ extern http_uri_status_t httpSeparateURI(http_uri_coding_t decoding, const char 
 extern void		httpSetAuthString(http_t *http, const char *scheme, const char *data) _CUPS_PUBLIC;
 extern void		httpSetBlocking(http_t *http, bool b) _CUPS_PUBLIC;
 extern void		httpSetCookie(http_t *http, const char *cookie) _CUPS_PUBLIC;
-extern int		httpSetCredentials(http_t *http, cups_array_t *certs) _CUPS_DEPRECATED_MSG("Use httpSetCredentialsAndKey instead.");
-extern bool		httpSetCredentialsAndKey(http_t *http, const char *credentials, const char *key) _CUPS_PUBLIC;
+extern int		httpSetCredentials(http_t *http, cups_array_t *certs) _CUPS_DEPRECATED_MSG("Use cupsSetClientCredentials instead.");
 extern void		httpSetDefaultField(http_t *http, http_field_t field, const char *value) _CUPS_PUBLIC;
 extern bool		httpSetEncryption(http_t *http, http_encryption_t e) _CUPS_PUBLIC;
 extern void		httpSetExpect(http_t *http, http_status_t expect) _CUPS_PUBLIC;

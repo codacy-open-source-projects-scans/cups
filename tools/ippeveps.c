@@ -470,7 +470,7 @@ get_options(cups_option_t **options)	/* O - Options */
     if ((value = getenv("IPP_SIDES")) == NULL)
       value = getenv("IPP_SIDES_DEFAULT");
 
-    if (value && ppd_cache->sides_option)
+    if (value && ppd_cache && ppd_cache->sides_option)
     {
       if (!strcmp(value, "one-sided") && ppd_cache->sides_1sided)
 	num_options = cupsAddOption(ppd_cache->sides_option, ppd_cache->sides_1sided, num_options, options);
@@ -483,7 +483,7 @@ get_options(cups_option_t **options)	/* O - Options */
     if ((value = getenv("IPP_PRINT_QUALITY")) == NULL)
       value = getenv("IPP_PRINT_QUALITY_DEFAULT");
 
-    if (value)
+    if (value && ppd_cache)
     {
       int		i;		/* Looping var */
       int		pq;		/* Print quality (0-2) */
@@ -1091,7 +1091,11 @@ raster_to_ps(const char *filename)	/* I - Filename */
       break;
     }
 
-    line = malloc(header.cupsBytesPerLine);
+    if ((line = malloc(header.cupsBytesPerLine)) == NULL)
+    {
+      fprintf(stderr, "ERROR: Unable to allocate %u bytes for line, aborting.\n", header.cupsBytesPerLine);
+      break;
+    }
 
     dsc_page(page);
 
