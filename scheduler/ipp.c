@@ -5376,6 +5376,8 @@ create_local_bg_thread(
   }
   else
   {
+    ipp_tag_t		group;		/* Current group tag */
+
     cupsdLogPrinter(printer, CUPSD_LOG_ERROR, "PPD creation failed: %s", cupsGetErrorString());
 
     /* Force printer to timeout and be deleted */
@@ -5385,6 +5387,31 @@ create_local_bg_thread(
     cupsRWUnlock(&printer->lock);
 
     send_ipp_status(con, IPP_STATUS_ERROR_DEVICE, _("Unable to create PPD: %s"), cupsGetErrorString());
+
+    cupsdLogClient(con, CUPSD_LOG_DEBUG, "Printer attributes:");
+
+    for (group = IPP_TAG_ZERO, attr = ippFirstAttribute(response); attr; attr = ippNextAttribute(response))
+    {
+      const char  *name;                /* Attribute name */
+      char        value[1024];          /* Attribute value */
+
+      if (group != ippGetGroupTag(attr))
+      {
+        group = ippGetGroupTag(attr);
+        if (group != IPP_TAG_ZERO)
+          cupsdLogClient(con, CUPSD_LOG_DEBUG, "%s", ippTagString(group));
+      }
+
+      if ((name = ippGetName(attr)) == NULL)
+        continue;
+
+      ippAttributeString(attr, value, sizeof(value));
+
+      cupsdLogClient(con, CUPSD_LOG_DEBUG, "%s %s%s '%s'", name, ippGetCount(attr) > 1 ? "1setOf " : "", ippTagString(ippGetValueTag(attr)), value);
+    }
+
+    cupsdLogClient(con, CUPSD_LOG_DEBUG, "end-of-attributes-tag");
+
     goto finish_response;
   }
 
@@ -7041,8 +7068,12 @@ get_notifications(cupsd_client_t *con)	/* I - Client connection */
     * If we don't have any new events, nothing to do here...
     */
 
+    cupsRWLockRead(&sub->lock);
     if (min_seq > (sub->first_event_id + cupsArrayCount(sub->events)))
+    {
+      cupsRWUnlock(&sub->lock);
       continue;
+    }
 
    /*
     * Otherwise copy all of the new events...
@@ -7061,6 +7092,8 @@ get_notifications(cupsd_client_t *con)	/* I - Client connection */
                  ((cupsd_event_t *)cupsArrayIndex(sub->events, j))->attrs, NULL,
         	 IPP_TAG_EVENT_NOTIFICATION, 0, NULL);
     }
+
+    cupsRWUnlock(&sub->lock);
   }
 }
 
@@ -8554,7 +8587,7 @@ print_job(cupsd_client_t  *con,		/* I - Client connection */
     cupsCopyString(type, "octet-stream", sizeof(type));
   }
 
-  cupsRWLockRead(&MimeDatabase->lock);
+  cupsRWLockRead(&MimeLock);
 
   if (!strcmp(super, "application") && !strcmp(type, "octet-stream"))
   {
@@ -8580,7 +8613,7 @@ print_job(cupsd_client_t  *con,		/* I - Client connection */
   else
     filetype = mimeType(MimeDatabase, super, type);
 
-  cupsRWUnlock(&MimeDatabase->lock);
+  cupsRWUnlock(&MimeLock);
 
   if (filetype &&
       (!format ||
@@ -9771,7 +9804,7 @@ send_document(cupsd_client_t  *con,	/* I - Client connection */
     cupsCopyString(type, "octet-stream", sizeof(type));
   }
 
-  cupsRWLockRead(&MimeDatabase->lock);
+  cupsRWLockRead(&MimeLock);
 
   if (!strcmp(super, "application") && !strcmp(type, "octet-stream"))
   {
@@ -9802,7 +9835,7 @@ send_document(cupsd_client_t  *con,	/* I - Client connection */
   else
     filetype = mimeType(MimeDatabase, super, type);
 
-  cupsRWUnlock(&MimeDatabase->lock);
+  cupsRWUnlock(&MimeLock);
 
   if (filetype)
   {
@@ -11348,7 +11381,7 @@ validate_job(cupsd_client_t  *con,	/* I - Client connection */
       return;
     }
 
-    cupsRWLockRead(&MimeDatabase->lock);
+    cupsRWLockRead(&MimeLock);
 
     if ((strcmp(super, "application") || strcmp(type, "octet-stream")) &&
 	!mimeType(MimeDatabase, super, type))
@@ -11360,12 +11393,12 @@ validate_job(cupsd_client_t  *con,	/* I - Client connection */
       ippAddString(con->response, IPP_TAG_UNSUPPORTED_GROUP, IPP_TAG_MIMETYPE,
                    "document-format", NULL, format->values[0].string.text);
 
-      cupsRWUnlock(&MimeDatabase->lock);
+      cupsRWUnlock(&MimeLock);
 
       return;
     }
 
-    cupsRWUnlock(&MimeDatabase->lock);
+    cupsRWUnlock(&MimeLock);
   }
 
  /*
