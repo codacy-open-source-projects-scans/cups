@@ -22,8 +22,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: CUPS 2.5\n"
 "Report-Msgid-Bugs-To: https://github.com/openprinting/cups/issues\n"
-"POT-Creation-Date: 2025-09-18 11:14-0400\n"
-"PO-Revision-Date: 2025-09-19 16:02+0000\n"
+"POT-Creation-Date: 2026-03-23 17:17-0400\n"
+"PO-Revision-Date: 2026-03-23 21:52+0000\n"
 "Last-Translator: Matthaiks <kitynska@gmail.com>\n"
 "Language-Team: Polish <https://hosted.weblate.org/projects/cups/cups/pl/>\n"
 "Language: pl\n"
@@ -32,7 +32,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 "
 "|| n%100>=20) ? 1 : 2);\n"
-"X-Generator: Weblate 5.14-dev\n"
+"X-Generator: Weblate 5.17-dev\n"
 
 msgid "\t\t(all)"
 msgstr "\t\t(wszystkie)"
@@ -1268,6 +1268,10 @@ msgid "%s: %s failed: %s"
 msgstr "%s: %s nieudany: %s"
 
 #, c-format
+msgid "%s: '-i' and '-n' are incompatible with '--ippfile', '-P', and '-X'."
+msgstr "%s: '-i' i '-n' są niezgodne z '--ippfile', '-P' i '-X'."
+
+#, c-format
 msgid "%s: Bad version %s for \"-V\"."
 msgstr "%s: Nieprawidłowa wersja %s dla \"-V\"."
 
@@ -1497,6 +1501,10 @@ msgid "%s: Expected job ID after \"-i\" option."
 msgstr "%s: Wymagany identyfikator zadania po opcji \"-i\"."
 
 #, c-format
+msgid "%s: File '%s' is too large to load in memory."
+msgstr "%s: Plik '%s' jest za duży, aby załadować go do pamięci."
+
+#, c-format
 msgid "%s: Invalid destination name in list \"%s\"."
 msgstr "%s: Nieprawidłowa nazwa punktu docelowego na liście \"%s\"."
 
@@ -1546,6 +1554,14 @@ msgid "%s: Scheduler is not running."
 msgstr "%s: Planista wydruku jest wyłączony."
 
 #, c-format
+msgid "%s: Unable to access '%s': %s"
+msgstr "%s: Nie można uzyskać dostępu do '%s': %s"
+
+#, c-format
+msgid "%s: Unable to allocate memory for '%s': %s"
+msgstr "%s: Nie można przydzielić pamięci dla '%s': %s"
+
+#, c-format
 msgid "%s: Unable to connect to server."
 msgstr "%s: Nie można połączyć się z serwerem."
 
@@ -1566,12 +1582,20 @@ msgid "%s: Unable to open %s: %s"
 msgstr "%s: Nie można otworzyć %s: %s"
 
 #, c-format
+msgid "%s: Unable to open '%s': %s"
+msgstr "%s: Nie można otworzyć '%s': %s"
+
+#, c-format
 msgid "%s: Unable to open PPD file: %s on line %d."
 msgstr "%s: Nie można otworzyć pliku PPD: %s w linii %d."
 
 #, c-format
+msgid "%s: Unable to read '%s': %s"
+msgstr "%s: Nie można odczytać '%s': %s"
+
+#, c-format
 msgid "%s: Unable to read MIME database from \"%s\" or \"%s\"."
-msgstr "%s: Nie można czytać bazy MIME z \"%s\" i \"%s\"."
+msgstr "%s: Nie można odczytać bazy MIME z \"%s\" i \"%s\"."
 
 #, c-format
 msgid "%s: Unknown argument \"%s\"."
@@ -1623,7 +1647,7 @@ msgstr "%s: Ostrzeżenie - opcja zestawu znaków zignorowana."
 
 #, c-format
 msgid "%s: Warning - content type option ignored."
-msgstr "%s: Osyrzeżenie - opcja typu treści zignorowana."
+msgstr "%s: Ostrzeżenie - opcja typu treści zignorowana."
 
 #, c-format
 msgid "%s: Warning - form option ignored."
@@ -1640,7 +1664,7 @@ msgid "-                       Cancel all jobs"
 msgstr "-                       Anuluj wszystkie zadania"
 
 msgid "-# num-copies           Specify the number of copies to print"
-msgstr "-# num-copies           Liczba kopii do wydrukowania"
+msgstr "-# liczba-kopii           Liczba kopii do wydrukowania"
 
 msgid "--[no-]debug-logging    Turn debug logging on/off"
 msgstr "--[no-]debug-logging    Włącz/Wyłącz zapisywanie danych debugowania"
@@ -1676,8 +1700,8 @@ msgstr ""
 msgid ""
 "--device-id device-id   Show models matching the given IEEE 1284 device ID"
 msgstr ""
-"--device-id device-id   Wyświetl modele pasujące do podanego identyfikatora "
-"IEEE 1284"
+"--device-id id-urządzenia   Wyświetl modele pasujące do podanego "
+"identyfikatora IEEE 1284"
 
 msgid "--domain regex          Match domain to regular expression"
 msgstr ""
@@ -1687,14 +1711,14 @@ msgid ""
 "--exclude-schemes scheme-list\n"
 "                        Exclude the specified URI schemes"
 msgstr ""
-"--exclude-schemes scheme-list\n"
+"--exclude-schemes lista-schematów\n"
 "                        Pomiń wskazane schematy URI"
 
 msgid ""
 "--exec utility [argument ...] ;\n"
 "                        Execute program if true"
 msgstr ""
-"--exec utility [argument ...] ;\n"
+"--exec program [argument ...] ;\n"
 "                        Uruchom program, jeśli prawda"
 
 msgid "--false                 Always false"
@@ -1720,17 +1744,18 @@ msgid ""
 "--include-schemes scheme-list\n"
 "                        Include only the specified URI schemes"
 msgstr ""
-"--include-schemes scheme-list\n"
+"--include-schemes lista-schematów\n"
 "                        Uwzględnij jedynie podane schematy URI"
 
 msgid "--ippserver filename    Produce ippserver attribute file"
-msgstr "--ippserver filename    Stwórz plik z atrybutami serwera IPP"
+msgstr "--ippserver nazwa_pliku    Wygeneruj plik atrybutów ippserver"
 
 msgid "--language locale       Show models matching the given locale"
-msgstr "--language locale       Wyświetl modele zgodne z podaną lokalizacją"
+msgstr ""
+"--language lokalizacja       Wyświetl modele zgodne z podaną lokalizacją"
 
 msgid "--literal-name name     Match service name to literal name value"
-msgstr "--literal-name name     Znajdź nazwę zgodną z podaną"
+msgstr "--literal-name nazwa     Znajdź nazwę zgodną z podaną"
 
 msgid "--local                 True if service is local"
 msgstr "--local                 Prawda, jeśli usługa jest lokalna"
@@ -1755,10 +1780,10 @@ msgstr ""
 "eksploatacyjnych"
 
 msgid "--not expression        Unary NOT of expression"
-msgstr "--not expression        Jednoargumentowe NIE wyrażenia"
+msgstr "--not wyrażenie        Jednoargumentowe NIE wyrażenia"
 
 msgid "--pam-service service   Use the named PAM service"
-msgstr "--pam-service service   Użyj wymienionej usługi PAM"
+msgstr "--pam-service usługa   Użyj wymienionej usługi PAM"
 
 msgid "--path regex            Match resource path to regular expression"
 msgstr ""
@@ -1771,7 +1796,7 @@ msgstr ""
 "klienta"
 
 msgid "--port number[-number]  Match port to number or range"
-msgstr "--port number[-number]  Dopasuj numer portu do liczby lub zakresu"
+msgstr "--port numer[-numer]  Dopasuj numer portu do liczby lub zakresu"
 
 msgid "--print                 Print URI if true"
 msgstr "--print                 Wyświetl URI, jeśli prawda"
@@ -1782,7 +1807,7 @@ msgstr "--print-name            Wyświetl nazwę usługi, jeśli prawda"
 msgid ""
 "--product name          Show models matching the given PostScript product"
 msgstr ""
-"--product name          Wyświetl modele pasujące do podanego produktu "
+"--product nazwa          Wyświetl modele pasujące do podanego produktu "
 "PostScript"
 
 msgid "--quiet                 Quietly report match via exit code"
@@ -1813,7 +1838,7 @@ msgid ""
 "--timeout seconds       Specify the maximum number of seconds to discover "
 "devices"
 msgstr ""
-"--timeout seconds       Ustaw maksymalny czas w sekundach na wykrycie "
+"--timeout sekundy       Ustaw maksymalny czas w sekundach na wykrycie "
 "urządzeń"
 
 msgid "--true                  Always true"
@@ -2065,6 +2090,9 @@ msgid ""
 msgstr ""
 "-P nazwapliku.plist       Wygeneruj plik XML plist i przetestuj raport na "
 "wyjściu standardowym"
+
+msgid "-P filename.ppd         Load printer attributes from PPD file"
+msgstr "-P nazwa_pliku.ppd         Załaduj atrybuty drukarki z pliku PPD"
 
 msgid "-P number[-number]      Match port to number or range"
 msgstr "-P numer[-numer]      Dopasuj port do numeru lub zakresu"
@@ -3663,11 +3691,11 @@ msgid ""
 "        device-id = %s\n"
 "        location = %s"
 msgstr ""
-"Urządzenie: URI = %s\n"
+"Urządzenie: uri = %s\n"
 "        klasa = %s\n"
 "        informacje = %s\n"
 "        producent-i-model = %s\n"
-"        id urządzenia = %s\n"
+"        id-urządzenia = %s\n"
 "        lokalizacja = %s"
 
 msgid "Direct Thermal Media"
@@ -5481,9 +5509,6 @@ msgstr "Nie można wczytać danych wydruku."
 msgid "Unable to read response."
 msgstr "Nie można odczytać odpowiedzi."
 
-msgid "Unable to reallocate IPP attribute value."
-msgstr "Nie można ponownie przydzielić wartości atrybutu IPP."
-
 msgid "Unable to rename job document file."
 msgstr "Nie można zmienić nazwy pliku dokumentu w zadaniu wydruku."
 
@@ -6093,7 +6118,7 @@ msgstr ""
 
 #. TRANSLATORS: Copies
 msgid "copies"
-msgstr ""
+msgstr "kopie"
 
 #. TRANSLATORS: Back Cover
 msgid "cover-back"
@@ -6274,9 +6299,6 @@ msgstr "cups-x509: Brak nazwy pliku CSR po '-R'."
 msgid "cups-x509: Missing certificate type after '-t'."
 msgstr "cups-x509: Brak typu certyfikatu po '-t'."
 
-msgid "cups-x509: Missing command argument."
-msgstr "cups-x509: Brak argumentu polecenia."
-
 msgid "cups-x509: Missing country after '-C'."
 msgstr "cups-x509: Brak kraju po '-C'."
 
@@ -6303,6 +6325,9 @@ msgstr "cups-x509: Brak nazwy głównej po '-r'."
 
 msgid "cups-x509: Missing state/province after '-S'."
 msgstr "cups-x509: Brak województwa/prowincji po '-S'."
+
+msgid "cups-x509: Missing sub-command argument."
+msgstr "cups-x509: Brak argumentu podpolecenia."
 
 msgid "cups-x509: Missing subjectAltName after '-a'."
 msgstr "cups-x509: Brak parametru subjectAltName po '-a'."
@@ -7697,11 +7722,13 @@ msgid "from-name"
 msgstr ""
 
 msgid "get-access-token [RESOURCE]    Get the current access token"
-msgstr ""
+msgstr "get-access-token [ZASÓB]    Uzyskaj aktualny token dostępu"
 
 msgid ""
 "get-client-id                  Get the client ID for the authorization server"
 msgstr ""
+"get-client-id                  Uzyskaj identyfikator klienta dla serwera "
+"autoryzacji"
 
 msgid "get-device-grant [RESOURCE]    Authorize access through a device"
 msgstr "get-device-grant [ZASÓB]    Autoryzuj dostęp za pomocą urządzenia"
@@ -7715,10 +7742,11 @@ msgstr ""
 
 msgid ""
 "get-metadata [NAME]            Get metadata from the authorization server"
-msgstr ""
+msgstr "get-metadata [NAZWA]            Uzyskaj metadane z serwera autoryzacji"
 
 msgid "get-user-id [RESOURCE] [NAME]  Get the authorized user ID"
 msgstr ""
+"get-user-id [ZASÓB] [NAZWA]  Uzyskaj autoryzowany identyfikator użytkownika"
 
 msgid "held"
 msgstr "wstrzymano"
@@ -7752,6 +7780,21 @@ msgstr ""
 #. TRANSLATORS: Insert Sheet
 msgid "insert-sheet"
 msgstr ""
+
+msgid ""
+"install COMMON-NAME FILENAME.crt [FILENAME.key]\n"
+"                           Install a certificate and (optional) private key."
+msgstr ""
+"install NAZWA-POSPOLITA NAZWA_PLIKU.crt [NAZWA_PLIKU.key]\n"
+"                           Zainstaluj certyfikat i (opcjonalnie) klucz "
+"prywatny."
+
+msgid "ippeveprinter: Unable to create IPP mapping of PPD file."
+msgstr "ippeveprinter: Nie można utworzyć mapowania IPP pliku PPD."
+
+#, c-format
+msgid "ippeveprinter: Unable to open \"%s\": %s on line %d."
+msgstr "ippeveprinter: Nie można otworzyć \"%s\": %s w wierszu %d."
 
 #, c-format
 msgid "ippfind: Bad regular expression: %s"
@@ -7848,8 +7891,9 @@ msgstr "ipptool: Można podać tylko jeden URI."
 msgid "ipptool: Missing count for \"-n\"."
 msgstr "ipptool: Brak liczby powtórzeń dla \"-n\"."
 
-msgid "ipptool: Missing filename for \"--ippserver\"."
-msgstr "ipptool: Brak nazwy pliku dla \"-ippserver\"."
+#, c-format
+msgid "ipptool: Missing filename for \"%s\"."
+msgstr "ipptool: Brak nazwy pliku dla \"%s\"."
 
 msgid "ipptool: Missing filename for \"-f\"."
 msgstr "ipptool: Brak nazwy pliku dla \"-f\"."
@@ -16116,6 +16160,9 @@ msgstr ""
 #~ msgid "Commands:"
 #~ msgstr "Polecenia:"
 
+#~ msgid "Unable to reallocate IPP attribute value."
+#~ msgstr "Nie można ponownie przydzielić wartości atrybutu IPP."
+
 #~ msgid "Usage: cups-oauth [OPTIONS] [COMMAND [ARGUMENT(S)]]"
 #~ msgstr "Użycie: cups-oauth [OPCJE] [POLECENIE [ARGUMENT(Y)]]"
 
@@ -16126,6 +16173,12 @@ msgstr ""
 #~ msgid "cups-x509: Bad URI '%s'."
 #~ msgstr "cups-x509: Nieprawidłowy URI '%s'."
 
+#~ msgid "cups-x509: Missing command argument."
+#~ msgstr "cups-x509: Brak argumentu polecenia."
+
 #, c-format
 #~ msgid "cups-x509: Unable to connect to '%s' on port %d: %s"
 #~ msgstr "cups-x509: Nie można połączyć się z '%s' na porcie %d: %s"
+
+#~ msgid "ipptool: Missing filename for \"--ippserver\"."
+#~ msgstr "ipptool: Brak nazwy pliku dla \"-ippserver\"."
