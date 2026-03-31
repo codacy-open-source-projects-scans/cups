@@ -2000,7 +2000,14 @@ add_job_subscriptions(
     }
 
     if (!recipient && !pullmethod)
+    {
       break;
+    }
+    else if (recipient && pullmethod)
+    {
+      send_ipp_status(con, IPP_STATUS_ERROR_BAD_REQUEST, _("Cannot specify both notify-pull-method and notify-recipient-uri in the same request."));
+      return;
+    }
 
     if (mask == CUPSD_EVENT_NONE)
       mask = CUPSD_EVENT_JOB_COMPLETED;
@@ -5988,7 +5995,14 @@ create_subscriptions(
     }
 
     if (!recipient && !pullmethod)
+    {
       break;
+    }
+    else if (recipient && pullmethod)
+    {
+      send_ipp_status(con, IPP_STATUS_ERROR_BAD_REQUEST, _("Cannot specify both notify-pull-method and notify-recipient-uri in the same request."));
+      return;
+    }
 
     if (mask == CUPSD_EVENT_NONE)
     {
@@ -6803,7 +6817,9 @@ get_jobs(cupsd_client_t  *con,		/* I - Client connection */
 
   ra = create_requested_array(con->request);
   for (job_attr = (char *)cupsArrayFirst(ra); job_attr; job_attr = (char *)cupsArrayNext(ra))
-    if (strcmp(job_attr, "job-id") &&
+    if (strcmp(job_attr, "date-time-at-completed") &&
+	strcmp(job_attr, "date-time-at-creation") &&
+	strcmp(job_attr, "job-id") &&
 	strcmp(job_attr, "job-k-octets") &&
 	strcmp(job_attr, "job-media-progress") &&
 	strcmp(job_attr, "job-more-info") &&

@@ -659,6 +659,11 @@ CUPS_SNMP_ADDRESS
 DEFAULT_RAW_PRINTING
 CUPS_MAX_COPIES
 CUPS_DEFAULT_PRINTCAP
+INSTALL_SYSUSERS_GROUPS
+CUPS_SYSUSERS_SYSTEM_GROUPS
+INSTALL_SYSUSERS
+CUPS_SYSUSERS_USER
+CUPS_SYSUSERS_GROUP
 CUPS_PRIMARY_SYSTEM_GROUP
 CUPS_SYSTEM_GROUPS
 CUPS_GROUP
@@ -738,6 +743,7 @@ LIBCUPS
 DSOFLAGS
 DSOXX
 DSO
+SYSUSERS_DIR
 CUPS_STATEDIR
 CUPS_SERVERROOT
 INSTALL_SYSV
@@ -878,6 +884,7 @@ with_docdir
 with_pkgconfpath
 with_logdir
 with_rundir
+with_sysusersdir
 enable_shared
 enable_libtool_unsupported
 with_optim
@@ -1619,6 +1626,7 @@ Optional Packages:
   --with-pkgconfpath      set path for cups.pc file
   --with-logdir           set path for log files
   --with-rundir           set transient run-time state directory
+  --with-sysusersdir      set directory for sysusers.d config file
   --with-optim            set optimization flags
   --with-archflags        set default architecture flags
   --with-ldarchflags      set program architecture flags
@@ -7553,6 +7561,39 @@ printf "%s\n" "#define CUPS_STATEDIR \"$CUPS_STATEDIR\"" >>confdefs.h
 
 
 
+# Check whether --with-sysusersdir was given.
+if test ${with_sysusersdir+y}
+then :
+  withval=$with_sysusersdir;
+    SYSUSERS_DIR="$withval"
+
+else $as_nop
+
+    SYSUSERS_DIR=""
+    if test "x$PKGCONFIG" != x
+then :
+
+	if $PKGCONFIG --exists systemd
+then :
+
+	    SYSUSERS_DIR="$($PKGCONFIG --variable=sysusersdir systemd)"
+
+fi
+
+fi
+
+fi
+
+
+if test "x$SYSUSERS_DIR" = xno
+then :
+
+    SYSUSERS_DIR=""
+
+fi
+
+
+
 if test "$mandir" = "\${datarootdir}/man" -a "$prefix" = "/"
 then :
 
@@ -11694,6 +11735,79 @@ printf "%s\n" "#define CUPS_DEFAULT_GROUP \"$CUPS_GROUP\"" >>confdefs.h
 printf "%s\n" "#define CUPS_DEFAULT_SYSTEM_GROUPS \"$CUPS_SYSTEM_GROUPS\"" >>confdefs.h
 
 
+CUPS_SYSUSERS_GROUP=""
+CUPS_SYSUSERS_USER=""
+if test "x$CUPS_USER" != "xroot" -a "x$CUPS_USER" != "xnobody"
+then :
+
+    if test "x$CUPS_GROUP" != "xroot" -a "x$CUPS_GROUP" != "xnobody" -a "x$CUPS_GROUP" != "xnogroup"
+then :
+
+	CUPS_SYSUSERS_USER="u $CUPS_USER -:$CUPS_GROUP \"CUPS printing service\""
+
+else $as_nop
+
+	CUPS_SYSUSERS_USER="u $CUPS_USER - \"CUPS printing service\""
+
+fi
+
+else $as_nop
+
+    if test "x$CUPS_GROUP" != "xroot" -a "x$CUPS_GROUP" != "xnobody" -a "x$CUPS_GROUP" != "xnogroup"
+then :
+
+	CUPS_SYSUSERS_GROUP="g $CUPS_GROUP"
+
+fi
+
+fi
+
+
+
+if test "x$CUPS_SYSUSERS_USER" != x -o "x$CUPS_SYSUSERS_GROUP" != x
+then :
+
+    INSTALL_SYSUSERS="install-sysusers"
+
+else $as_nop
+
+    INSTALL_SYSUSERS=""
+
+fi
+
+
+CUPS_SYSUSERS_SYSTEM_GROUPS=""
+for group in $CUPS_SYSTEM_GROUPS; do
+    if test "x$group" != "xroot" -a "x$group" != "xnobody" -a "x$group" != "xnogroup"
+then :
+
+	if test "x$CUPS_SYSUSERS_SYSTEM_GROUPS" = x
+then :
+
+	    CUPS_SYSUSERS_SYSTEM_GROUPS="g $group"
+
+else $as_nop
+
+	    CUPS_SYSUSERS_SYSTEM_GROUPS="$CUPS_SYSUSERS_SYSTEM_GROUPS
+g $group"
+
+fi
+
+fi
+done
+
+
+if test "x$CUPS_SYSUSERS_SYSTEM_GROUPS" != x
+then :
+
+    INSTALL_SYSUSERS_GROUPS="install-sysusers-groups"
+
+else $as_nop
+
+    INSTALL_SYSUSERS_GROUPS=""
+
+fi
+
 
 
 # Check whether --with-printcap was given.
@@ -11969,7 +12083,7 @@ then :
 
 fi
 
-ac_config_files="$ac_config_files Makedefs conf/cups-files.conf conf/cupsd.conf conf/mime.convs conf/pam.std conf/snmp.conf cups.pc desktop/cups.desktop scheduler/cups-lpd.xinetd scheduler/cups.sh scheduler/cups.xml scheduler/org.cups.cups-lpd.plist scheduler/cups-lpdAT.service scheduler/cups.path scheduler/cups.service scheduler/cups.socket packaging/cups.list"
+ac_config_files="$ac_config_files Makedefs conf/cups-files.conf conf/cups-sysusers.conf conf/cups-sysusers-groups.conf conf/cupsd.conf conf/mime.convs conf/pam.std conf/snmp.conf cups.pc desktop/cups.desktop scheduler/cups-lpd.xinetd scheduler/cups.sh scheduler/cups.xml scheduler/org.cups.cups-lpd.plist scheduler/cups-lpdAT.service scheduler/cups.path scheduler/cups.service scheduler/cups.socket packaging/cups.list"
 
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
@@ -12660,6 +12774,8 @@ do
     "config.h") CONFIG_HEADERS="$CONFIG_HEADERS config.h" ;;
     "Makedefs") CONFIG_FILES="$CONFIG_FILES Makedefs" ;;
     "conf/cups-files.conf") CONFIG_FILES="$CONFIG_FILES conf/cups-files.conf" ;;
+    "conf/cups-sysusers.conf") CONFIG_FILES="$CONFIG_FILES conf/cups-sysusers.conf" ;;
+    "conf/cups-sysusers-groups.conf") CONFIG_FILES="$CONFIG_FILES conf/cups-sysusers-groups.conf" ;;
     "conf/cupsd.conf") CONFIG_FILES="$CONFIG_FILES conf/cupsd.conf" ;;
     "conf/mime.convs") CONFIG_FILES="$CONFIG_FILES conf/mime.convs" ;;
     "conf/pam.std") CONFIG_FILES="$CONFIG_FILES conf/pam.std" ;;
