@@ -1,7 +1,7 @@
 /*
  * Authorization routines for the CUPS scheduler.
  *
- * Copyright © 2020-2025 by OpenPrinting.
+ * Copyright © 2020-2026 by OpenPrinting.
  * Copyright © 2007-2019 by Apple Inc.
  * Copyright © 1997-2007 by Easy Software Products, all rights reserved.
  *
@@ -382,7 +382,7 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
   }
 #ifdef HAVE_AUTHORIZATION_H
   else if (!strncmp(authorization, "AuthRef ", 8) &&
-           httpAddrLocalhost(httpGetAddress(con->http)))
+           httpAddrGetFamily(httpGetAddress(con->http)) == AF_LOCAL)
   {
     OSStatus		status;		/* Status */
     char		authdata[HTTP_MAX_VALUE];
@@ -463,7 +463,7 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
 #endif /* HAVE_AUTHORIZATION_H */
 #if defined(SO_PEERCRED) && defined(AF_LOCAL)
   else if (PeerCred != CUPSD_PEERCRED_OFF && !strncmp(authorization, "PeerCred ", 9) &&
-           con->http->hostaddr->addr.sa_family == AF_LOCAL && con->best)
+           httpAddrGetFamily(httpGetAddress(con->http)) == AF_LOCAL && con->best)
   {
    /*
     * Use peer credentials from domain socket connection...
@@ -553,7 +553,7 @@ cupsdAuthorize(cupsd_client_t *con)	/* I - Client connection */
   }
 #endif /* SO_PEERCRED && AF_LOCAL */
   else if (!strncmp(authorization, "Local", 5) &&
-	   httpAddrLocalhost(httpGetAddress(con->http)))
+	   httpAddrGetFamily(httpGetAddress(con->http)) == AF_LOCAL)
   {
    /*
     * Get Local certificate authentication data...
@@ -1239,7 +1239,7 @@ cupsdCheckGroup(
   group = getgrnam(groupname);
   endgrent();
 
-  if (group != NULL)
+  if (user && group)
   {
    /*
     * Group exists, check it...
@@ -1253,7 +1253,7 @@ cupsdCheckGroup(
       * User appears in the group membership...
       */
 
-      if (!_cups_strcasecmp(username, group->gr_mem[i]))
+      if (!strcmp(user->pw_name, group->gr_mem[i]))
 	return (1);
     }
 
@@ -1264,25 +1264,24 @@ cupsdCheckGroup(
     * belongs to...
     */
 
-    if (user)
-    {
-      int	ngroups;		/* Number of groups */
+    int		ngroups;		/* Number of groups */
 #  ifdef __APPLE__
-      int	groups[2048];		/* Groups that user belongs to */
+    int		groups[2048];		/* Groups that user belongs to */
 #  else
-      gid_t	groups[2048];		/* Groups that user belongs to */
+    gid_t	groups[2048];		/* Groups that user belongs to */
 #  endif /* __APPLE__ */
 
-      ngroups = (int)(sizeof(groups) / sizeof(groups[0]));
+    ngroups = (int)(sizeof(groups) / sizeof(groups[0]));
 #  ifdef __APPLE__
-      getgrouplist(username, (int)user->pw_gid, groups, &ngroups);
+    getgrouplist(user->pw_name, (int)user->pw_gid, groups, &ngroups);
 #  else
-      getgrouplist(username, user->pw_gid, groups, &ngroups);
+    getgrouplist(user->pw_name, user->pw_gid, groups, &ngroups);
 #endif /* __APPLE__ */
 
-      for (i = 0; i < ngroups; i ++)
-        if ((int)groupid == (int)groups[i])
-	  return (1);
+    for (i = 0; i < ngroups; i ++)
+    {
+      if ((int)groupid == (int)groups[i])
+	return (1);
     }
 #endif /* HAVE_GETGROUPLIST */
   }
@@ -2005,8 +2004,8 @@ cupsdIsAuthorized(cupsd_client_t *con,	/* I - Connection */
 	   name;
 	   name = (char *)cupsArrayNext(best->names))
       {
-	if (!_cups_strcasecmp(name, "@OWNER") && owner &&
-	    !_cups_strcasecmp(username, ownername))
+	if (!_cups_strcasecmp(name, "@OWNER") && owner && pw &&
+	    !strcmp(pw->pw_name, ownername))
 	  return (HTTP_STATUS_OK);
 	else if (!_cups_strcasecmp(name, "@SYSTEM"))
 	{
@@ -2018,7 +2017,7 @@ cupsdIsAuthorized(cupsd_client_t *con,	/* I - Connection */
 	  if (cupsdCheckGroup(username, pw, name + 1))
 	    return (HTTP_STATUS_OK);
 	}
-	else if (!_cups_strcasecmp(username, name))
+	else if (pw && !strcmp(pw->pw_name, name))
 	  return (HTTP_STATUS_OK);
       }
 
