@@ -92,6 +92,10 @@ v2.5b1 - YYYY-MM-DD
   releasing to the printer (Issue #1456)
 - Updated `httpAddrLookup` to return a numeric address when the resolver
   returns "localhost" for a non-loopback address.
+- Updated the IPP Everywhere PPD generator to support "job-presets-supported"
+  pairs for custom boolean, integer, and keyword attributes.
+- Updated the default "cups.conf" policies to specify the Set-Printer-Attributes
+  operation as an administrative operation.
 - Deprecated the "page-border" Job Template attribute (Issue #1020)
 - Removed the `cups-config` utility (use `pkg-config` instead)
 - Fixed use-after-free in `cupsdAcceptClient()` when we log warning during error
@@ -170,6 +174,7 @@ v2.5b1 - YYYY-MM-DD
 - Fixed A4 support in the `ippevepcl` program (Issue #1544)
 - Fixed issues with the environment variable support of CGI programs
   (Issue #1547)
+- Fixed potential crash bug in `cupsCheckDestSupported` function.
 - Removed hash support for SHA2-512-224 and SHA2-512-256.
 - Removed `mantohtml` script for generating html pages (use
   `https://www.msweet.org/mantohtml/`)
